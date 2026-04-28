@@ -53,9 +53,9 @@ export class PmfbyGrievanceService {
 
   /**
    * Submit a PMFBY grievance ticket.
-   * Expects a standard Beckn `init` body. Grievance fields are read from
-   * `message.order.fulfillments[0].customer` and a `grievance-details` tag
-   * on the person object, mirroring the PMKisan grievance pattern.
+   * Expects a standard Beckn `init` body. All grievance fields are read as
+   * flat tags on `message.order.fulfillments[0].customer.person.tags`,
+   * each tag having a `descriptor.code` and a top-level `value`.
    *
    * Returns a Beckn `on_init` response envelope.
    */
@@ -65,30 +65,24 @@ export class PmfbyGrievanceService {
     const fulfillment = order?.fulfillments?.[0];
     const customer = fulfillment?.customer;
     const person = customer?.person;
-    const contact = customer?.contact;
 
-    // ── Extract contact info ──────────────────────────────────────────────
-    const requestorMobileNo: string = contact?.phone ?? '';
-    const customerName: string = person?.name ?? '';
-
-    // ── Extract grievance fields from person tags ────────────────────────
-    const grievanceDetailsTag = person?.tags?.find(
-      (tag: any) => tag?.descriptor?.code === 'grievance-details',
-    );
-
+    // ── Helper: read a flat tag value by code from person.tags ───────────
     const getTagValue = (code: string): string =>
-      grievanceDetailsTag?.list?.find(
-        (item: any) => item?.descriptor?.code === code,
+      person?.tags?.find(
+        (tag: any) => tag?.descriptor?.code === code,
       )?.value ?? '';
 
-    const complaintDate: string = getTagValue('complaint-date');
-    const receiptSourceID: number = Number(getTagValue('receipt-source-id')) || 0;
-    const ticketCategoryID: number = Number(getTagValue('ticket-category-id')) || 0;
-    const ticketSubCategoryID: number = Number(getTagValue('ticket-sub-category-id')) || 0;
-    const requestYear: string = getTagValue('request-year');
-    const requestSeason: number = Number(getTagValue('request-season')) || 0;
-    const applicationNo: string = getTagValue('application-no');
-    const grievenceDescription: string = getTagValue('grievance-description');
+    // ── Extract all fields from flat person tags ─────────────────────────
+    const requestorMobileNo: string = getTagValue('phone_number');
+    const customerName: string = person?.name ?? '';
+    const complaintDate: string = getTagValue('complaint_date');
+    const receiptSourceID: number = Number(getTagValue('receipt_source_id')) || 0;
+    const ticketCategoryID: number = Number(getTagValue('ticket_category_id')) || 0;
+    const ticketSubCategoryID: number = Number(getTagValue('ticket_sub_category_id')) || 0;
+    const requestYear: string = getTagValue('request_year');
+    const requestSeason: number = Number(getTagValue('request_season')) || 0;
+    const applicationNo: string = getTagValue('application_no');
+    const grievenceDescription: string = getTagValue('grievance_description');
 
     this.logger.log(`[PMFBY GRIEVANCE] Submitting for mobile: ${requestorMobileNo}, applicationNo: ${applicationNo}`);
 
