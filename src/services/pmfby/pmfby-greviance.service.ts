@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 
 @Injectable()
 export class PmfbyGrievanceService {
@@ -9,8 +10,178 @@ export class PmfbyGrievanceService {
     private readonly configService?: ConfigService,
   ) { }
 
-  async createGrievance(body: any) {
-    console.log("createGrievance body--->>", body);
-    return { success: true, message: "Grievance created successfully" };
+  private getBaseUrl(): string {
+    return this.configService?.get<string>('PMFBY_BASE_URL') || process.env.PMFBY_BASE_URL;
   }
-} 
+
+  private getAppAccessUID(): string {
+    return this.configService?.get<string>('PMFBY_APP_ACCESS_UID') || process.env.PMFBY_APP_ACCESS_UID;
+  }
+
+  private getAppAccessPWD(): string {
+    return this.configService?.get<string>('PMFBY_APP_ACCESS_PWD') || process.env.PMFBY_APP_ACCESS_PWD;
+  }
+
+  /**
+   * Step 1: Login to FGMS and retrieve JWT token
+   */
+  private async getFGMSToken(): Promise<string> {
+    const baseUrl = this.getBaseUrl();
+    const appAccessUID = this.getAppAccessUID();
+    const appAccessPWD = this.getAppAccessPWD();
+
+    this.logger.log('Fetching FGMS login token...');
+
+    const response = await axios.request({
+      method: 'post',
+      url: `${baseUrl}/krphapi/FGMS/NICUsersLogin`,
+      headers: { 'Content-Type': 'application/json' },
+      data: { appAccessUID, appAccessPWD },
+      timeout: 15000,
+    });
+
+    const token: string | undefined = response.data?.responseDynamic?.token?.Token;
+
+    if (!token) {
+      this.logger.error('FGMS login failed — no token in response', response.data);
+      throw new Error('FGMS login failed: token not found in response');
+    }
+
+    this.logger.log('FGMS token retrieved successfully');
+    return token;
+  }
+
+  /**
+   * Submit a PMFBY grievance ticket.
+   * Expects a standard Beckn `init` body. Grievance fields are read from
+   * `message.order.fulfillments[0].customer` and a `grievance-details` tag
+   * on the person object, mirroring the PMKisan grievance pattern.
+   *
+   * Returns a Beckn `on_init` response envelope.
+   */
+  async createGrievance(body: any): Promise<any> {
+    const context = body?.context;
+    const order = body?.message?.order;
+    const fulfillment = order?.fulfillments?.[0];
+    const customer = fulfillment?.customer;
+    const person = customer?.person;
+    const contact = customer?.contact;
+
+    // ── Extract contact info ──────────────────────────────────────────────
+    const requestorMobileNo: string = contact?.phone ?? '';
+    const customerName: string = person?.name ?? '';
+
+    // ── Extract grievance fields from person tags ────────────────────────
+    const grievanceDetailsTag = person?.tags?.find(
+      (tag: any) => tag?.descriptor?.code === 'grievance-details',
+    );
+
+    const getTagValue = (code: string): string =>
+      grievanceDetailsTag?.list?.find(
+        (item: any) => item?.descriptor?.code === code,
+      )?.value ?? '';
+
+    const complaintDate: string = getTagValue('complaint-date');
+    const receiptSourceID: number = Number(getTagValue('receipt-source-id')) || 0;
+    const ticketCategoryID: number = Number(getTagValue('ticket-category-id')) || 0;
+    const ticketSubCategoryID: number = Number(getTagValue('ticket-sub-category-id')) || 0;
+    const requestYear: string = getTagValue('request-year');
+    const requestSeason: number = Number(getTagValue('request-season')) || 0;
+    const applicationNo: string = getTagValue('application-no');
+    const grievenceDescription: string = getTagValue('grievance-description');
+
+    this.logger.log(`[PMFBY GRIEVANCE] Submitting for mobile: ${requestorMobileNo}, applicationNo: ${applicationNo}`);
+
+    let apiResponse: any = {};
+    try {
+      // Step 1: Authenticate
+      const token = await this.getFGMSToken();
+
+      // Step 2: Submit grievance ticket
+      const response = await axios.request({
+        method: 'post',
+        url: `${this.getBaseUrl()}/krphapi/FGMS/AddKRPHNCIPGrievenceSupportTicket`,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token,
+        },
+        data: {
+          requestorMobileNo,
+          complaintDate,
+          receiptSourceID,
+          ticketCategoryID,
+          ticketSubCategoryID,
+          requestYear,
+          requestSeason,
+          applicationNo,
+          grievenceDescription,
+        },
+        timeout: 15000,
+      });
+
+      this.logger.log('FGMS grievance response: ' + JSON.stringify(response.data));
+      apiResponse = response.data;
+    } catch (error) {
+      this.logger.error(`PMFBY Grievance API error: ${error.message}`, error.response?.data ?? '');
+      apiResponse = { responseCode: '0', responseMessage: error.message };
+    }
+
+    // ── Map FGMS response to Beckn on_init envelope ──────────────────────
+    const isSuccess = apiResponse?.responseCode === '1';
+    const ticketNo: string = apiResponse?.responseDynamic?.GrievenceSupportTicketNo ?? '';
+    const ticketId: string = String(apiResponse?.responseDynamic?.GrievenceSupportTicketID ?? '');
+    const responseMessage: string = apiResponse?.responseMessage ?? '';
+
+    return {
+      context: {
+        ...context,
+        action: 'on_init',
+        timestamp: new Date().toISOString(),
+      },
+      message: {
+        order: {
+          provider: { id: 'pmfby-grievance' },
+          items: [{ id: 'pmfby-grievance' }],
+          fulfillments: [
+            {
+              customer: {
+                person: { name: customerName },
+                contact: { phone: requestorMobileNo },
+              },
+            },
+          ],
+          tags: [
+            {
+              descriptor: {
+                code: 'grievance-response',
+                name: 'Grievance Response',
+              },
+              list: [
+                {
+                  descriptor: { code: 'status', name: 'Status' },
+                  value: isSuccess ? 'Submitted' : 'Failed',
+                },
+                {
+                  descriptor: { code: 'ticket-no', name: 'Ticket Number' },
+                  value: ticketNo,
+                },
+                {
+                  descriptor: { code: 'ticket-id', name: 'Ticket ID' },
+                  value: ticketId,
+                },
+                {
+                  descriptor: { code: 'application-no', name: 'Application Number' },
+                  value: applicationNo,
+                },
+                {
+                  descriptor: { code: 'message', name: 'Message' },
+                  value: responseMessage,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+  }
+}
