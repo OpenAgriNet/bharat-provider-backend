@@ -12,6 +12,7 @@ import { HasuraService } from "./services/hasura/hasura.service";
 import { S3Service } from "./services/s3/s3.service";
 import { SeekerService } from "./seeker/seeker.service";
 import { PmfbyService } from "./services/pmfby/pmfby.service";
+import { PmfbyGrievanceService } from "./services/pmfby/pmfby-greviance.service";
 import { WeatherForecastService } from "./services/weatherforecast/weatherforecast.service";
 import { DatabaseService } from "./services/weatherforecast/database.service";
 import { MandiService } from "./services/mandi/mandi.service";
@@ -43,6 +44,7 @@ import { PmkisanGrievanceService } from "./services/pmkisan-grievance/pmkisan-gr
     MandiService,
     GfrService,
     PmkisanGrievanceService,
+    PmfbyGrievanceService,
   ],
 })
 export class AppModule {}
