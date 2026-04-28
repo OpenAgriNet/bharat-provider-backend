@@ -20,6 +20,7 @@ import { firstValueFrom } from "rxjs";
 import { HttpService } from "@nestjs/axios";
 import { GfrService } from "./services/gfr/gfr.service";
 import { PmkisanGrievanceService } from "./services/pmkisan-grievance/pmkisan-grievance.service";
+import { PmfbyGrievanceService } from "./services/pmfby/pmfby-greviance.service";
 
 @Controller("")
 export class AppController {
@@ -29,6 +30,7 @@ export class AppController {
     private readonly httpService: HttpService,
     private readonly gfrService: GfrService,
     private readonly pmkisanGrievanceService: PmkisanGrievanceService,
+    private readonly pmfbyGrievanceService: PmfbyGrievanceService,
   ) {}
 
   @Get()
@@ -199,44 +201,45 @@ export class AppController {
   @Post("mobility/init")
   async initCourse1(@Body() body: any) {
     console.log("init api calling");
-    if (body?.message?.order?.provider?.id === "pmkisan-greviance") {
-      console.log("INSIDE PMKISAN GRIEVANCE INIT...");
-      const grievanceResponse =
-        await this.pmkisanGrievanceService.createGrievance(body);
-      console.log(
-        "PM Kisan Grievance Response:",
-        JSON.stringify(grievanceResponse, null, 2),
-      );
-      return grievanceResponse;
-    } else if (
-      body?.message?.order?.provider?.id?.toLowerCase() == "pmfby-agri" &&
-      body?.message?.order?.items?.[0]?.id?.toLowerCase() == "pmfby"
-    ) {
-      console.log("INSIDE PMFBY INIT...");
-      return this.appService.handlePmfbyInit(body);
-    } else if (body?.message?.order?.provider?.id === "shc-discovery") {
-      try {
-        // Fetch soil health data
-
-        let soilHeallthCardResponse =
-          await this.appService.fetchAndMapSoilHealthCard(body);
-
-        // Pass the first item to handleStatusForSHC for mapping
-        return await this.appService.handleStatusForSHC(
-          soilHeallthCardResponse,
-          body,
-        );
-      } catch (error) {
-        throw new HttpException(
-          `Failed to process soil health card: ${error.message}`,
-          error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-        );
-      }
-    } else if (body?.message?.order) {
-      console.log("Inside pmkisan init...");
-      return this.appService.handlePmkisanInit(body);
-    } else {
-      return this.appService.handleInit(body);
+  
+    const providerId = body?.message?.order?.provider?.id?.toLowerCase() ?? "";
+    const itemId = body?.message?.order?.items?.[0]?.id?.toLowerCase() ?? "";
+  
+    console.log(`[init] provider: ${providerId}, item: ${itemId}`);
+  
+    switch (providerId) {
+      case "pmkisan-greviance":
+        console.log("INSIDE PMKISAN GRIEVANCE INIT...");
+        const grievanceResponse = await this.pmkisanGrievanceService.createGrievance(body);
+        console.log("PM Kisan Grievance Response:", JSON.stringify(grievanceResponse, null, 2));
+        return grievanceResponse;
+  
+      case "pmfby-grievance":
+        console.log("INSIDE PMFBY GRIEVANCE INIT...");
+        return this.pmfbyGrievanceService.createGrievance(body);
+  
+      case "pmfby-agri":
+        console.log("INSIDE PMFBY INIT...");
+        return this.appService.handlePmfbyInit(body);
+  
+      case "shc-discovery":
+        console.log("INSIDE SHC INIT...");
+        try {
+          const soilHealthCardResponse = await this.appService.fetchAndMapSoilHealthCard(body);
+          return await this.appService.handleStatusForSHC(soilHealthCardResponse, body);
+        } catch (error) {
+          throw new HttpException(
+            `Failed to process soil health card: ${error.message}`,
+            error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+          );
+        }
+  
+      default:
+        if (body?.message?.order) {
+          console.log("INSIDE PMKISAN INIT...");
+          return this.appService.handlePmkisanInit(body);
+        }
+        return this.appService.handleInit(body);
     }
   }
 
