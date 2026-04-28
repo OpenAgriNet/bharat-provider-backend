@@ -173,6 +173,41 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Find the nearest district for Sathi seed availability using the
+   * get_sathi_nearest_district(lat, lon) PostgreSQL function.
+   * Returns state_code and district_lgd_code from sathi_corrdinate_lgd_tbl.
+   */
+  async findSathiNearestDistrict(
+    latitude: number,
+    longitude: number,
+  ): Promise<{ state_code: string; district_lgd_code: string; state_name: string; district_name: string } | null> {
+    try {
+      this.logger.log(
+        `Sathi: Querying nearest district for lat: ${latitude}, lon: ${longitude}`,
+      );
+      const query = `SELECT * FROM get_sathi_nearest_district($1, $2) LIMIT 1;`;
+      const result: QueryResult = await this.pool.query(query, [latitude, longitude]);
+      if (result.rows && result.rows.length > 0) {
+        const row = result.rows[0];
+        this.logger.log(
+          `Sathi: Nearest district found — state: ${row.state_name} (${row.state_code}), district: ${row.district_name} (${row.district_lgd_code})`,
+        );
+        return {
+          state_code: String(row.state_code),
+          district_lgd_code: String(row.district_lgd_code),
+          state_name: row.state_name ?? '',
+          district_name: row.district_name ?? '',
+        };
+      }
+      this.logger.warn('Sathi: No nearest district found in sathi_corrdinate_lgd_tbl');
+      return null;
+    } catch (error) {
+      this.logger.error('Sathi: Error querying get_sathi_nearest_district', error);
+      throw error;
+    }
+  }
+
   async findMandiMasterData(
     latitude: number,
     longitude: number,

@@ -21,6 +21,7 @@ import { HttpService } from "@nestjs/axios";
 import { GfrService } from "./services/gfr/gfr.service";
 import { PmkisanGrievanceService } from "./services/pmkisan-grievance/pmkisan-grievance.service";
 import { PmfbyGrievanceService } from "./services/pmfby/pmfby-greviance.service";
+import { SathiService } from "./services/sathi/sathi.service";
 
 @Controller("")
 export class AppController {
@@ -31,6 +32,7 @@ export class AppController {
     private readonly gfrService: GfrService,
     private readonly pmkisanGrievanceService: PmkisanGrievanceService,
     private readonly pmfbyGrievanceService: PmfbyGrievanceService,
+    private readonly sathiSeedService: SathiService,
   ) {}
 
   @Get()
@@ -133,6 +135,9 @@ export class AppController {
         );
         return gfrRecResponse;
       }
+      case "sathi-seed":
+        console.log("INSIDE SATHI SEED AVAILABILITY SEARCH...");
+        return this.sathiSeedService.getSeedAvailability(body);
 
       default:
         return this.appService.searchForIntentQuery(body);
@@ -187,6 +192,8 @@ export class AppController {
         }
       case categoryCode === "price-discovery":
         return itemDescriptorCode === "mandi" ? "mandi" : "unknown";
+      case gfrProviderId === "sathi-seed":
+          return "sathi-seed";
       default:
         return "unknown";
     }
