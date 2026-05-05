@@ -40,24 +40,6 @@ export class SmamService {
     );
   }
 
-  private async sendOnSearchToBap(onSearchPayload: any): Promise<void> {
-    const bapUri = onSearchPayload?.context?.bap_uri;
-    if (!bapUri) {
-      this.logger.warn("[SMAM] Missing bap_uri, skipping on_search callback.");
-      return;
-    }
-
-    const callbackUrl = `${String(bapUri).replace(/\/$/, "")}/on_search`;
-    this.logger.log(`[SMAM] Sending on_search callback to ${callbackUrl}`);
-
-    await axios.post(callbackUrl, onSearchPayload, {
-      headers: { "Content-Type": "application/json" },
-      timeout: 15000,
-    });
-
-    this.logger.log("[SMAM] on_search callback sent successfully.");
-  }
-
   async searchSMAMBenfitData(body: any): Promise<any> {
     const context = body?.context ?? {};
     const searchType = this.getSearchType(body);
@@ -84,7 +66,7 @@ export class SmamService {
 
     if (!searchValue) {
       this.logger.warn("[SMAM] Missing search_value in request payload.");
-      const emptyResponse = {
+      return {
         context: {
           ...context,
           action: "on_search",
@@ -97,8 +79,6 @@ export class SmamService {
           },
         },
       };
-      await this.sendOnSearchToBap(emptyResponse);
-      return emptyResponse;
     }
 
     const url = `${baseUrl.replace(/\/$/, "")}/api/BeneficiaryService/GetApplicationStatusByAI`;
@@ -113,7 +93,7 @@ export class SmamService {
             Token: token,
             "Content-Type": "application/json",
           },
-          timeout: 15000,
+          timeout: 30000,
         },
       );
 
@@ -199,7 +179,6 @@ export class SmamService {
           },
         },
       };
-      await this.sendOnSearchToBap(onSearchResponse);
       return onSearchResponse;
     } catch (error) {
       this.logger.error(
@@ -207,7 +186,7 @@ export class SmamService {
         error?.response?.data ?? "",
       );
 
-      const errorResponse = {
+      return {
         context: {
           ...context,
           action: "on_search",
@@ -231,14 +210,6 @@ export class SmamService {
           },
         },
       };
-      try {
-        await this.sendOnSearchToBap(errorResponse);
-      } catch (callbackError) {
-        this.logger.error(
-          `[SMAM] Failed to send error on_search callback: ${callbackError.message}`,
-        );
-      }
-      return errorResponse;
     }
   }
 }
