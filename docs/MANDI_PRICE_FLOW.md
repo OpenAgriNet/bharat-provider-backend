@@ -1,6 +1,6 @@
 # Mandi Price Discovery Flow
 
-This document describes the end-to-end flow for **Mandi Price Discovery** (price-discovery + mandi) in the Beckn provider: search by location, date range, and commodity code; resolve markets via `get_markets_at_point`; fetch prices from Agmarknet Vistaar API; return on_search catalog.
+This document describes the end-to-end flow for **Mandi Price Discovery** (price-discovery + mandi) in the Beckn provider: search by location, date range, and commodity code; generate AGMARKNET dynamic token; fetch prices from AGMARKNET location API; return on_search catalog.
 
 · Version: 1.1.0  
 · Domain: schemes:vistaar  
@@ -14,8 +14,8 @@ This document describes the end-to-end flow for **Mandi Price Discovery** (price
 
 ```mermaid
 flowchart LR
-    A[Search] --> B[Resolve markets at lat/lon]
-    B --> C[Agmarknet Vistaar API]
+    A[Search] --> B[Generate dynamic token]
+    B --> C[Agmarknet Vistaar Location API]
     C --> D[on_search catalog]
 ```
 
@@ -23,11 +23,11 @@ flowchart LR
 
 **Required in fulfillment.** The object `message.intent.fulfillment.stops[0]` must include:
 
-- **location** — `lat` and `lon` (strings), or `gps` as `"lat,lon"`. Used to resolve markets at that point.
-- **time.range** — `start` and `end` as ISO date strings. Converted to dd-MM-yyyy and sent to the price API as from_date / to_date.
-- **commoditycode** — A number (e.g. `2` for Paddy). Sent to Agmarknet for every market.
+- **location** — `lat` and `lon` (strings), or `gps` as `"lat,lon"`. Used directly for AGMARKNET location lookup.
+- **time.range** — `start` and `end` as ISO date strings. Converted to dd-MM-yyyy; the provider uses `end` (or `start` fallback) as single `date` for the location API.
+- **commoditycode** — A number (e.g. `2` for Paddy). Mapped to AGMARKNET `commodity_id`.
 
-**Provider behaviour.** The provider resolves markets at the point using the DB function `get_markets_at_point(lat, lon)`. For each market it calls the Agmarknet Vistaar API with statecode, districtcode, marketcode, commoditycode, and the date range. All results are combined into a single **on_search** catalog.
+**Provider behaviour.** The provider generates a dynamic token using AGMARKNET credentials, then calls the AGMARKNET location endpoint with `commodity_id`, `token`, `date`, `lat`, and `long`. The returned records are mapped into a single **on_search** catalog.
 
 ---
 
@@ -37,21 +37,19 @@ flowchart LR
 sequenceDiagram
     participant Client
     participant BPP as BPP (Provider)
-    participant DB as DB (get_markets_at_point)
-    participant Agmarknet as Agmarknet Vistaar API
+    participant Auth as AGMARKNET Token API
+    participant Agmarknet as AGMARKNET Location API
 
     Client->>BPP: POST /mobility/search (price-discovery, mandi, lat/lon, time.range, commoditycode)
     BPP->>BPP: Validate location, time.range, commoditycode
     alt Missing required param
         BPP-->>Client: on_search (empty catalog + log)
     else Valid
-        BPP->>DB: get_markets_at_point(lat, lon)
-        DB-->>BPP: list of markets (statecode, districtcode, marketcode, etc.)
-        loop For each market
-            BPP->>Agmarknet: GET /v1/fetch-agmarknet-vistaar?statecode&districtcode&marketcode&commoditycode&from_date&to_date
-            Agmarknet-->>BPP: price records (or 400)
-        end
-        BPP->>BPP: buildMandiCatalog(results)
+        BPP->>Auth: POST /v1/generate-dynamic-token-agmarknet
+        Auth-->>BPP: token
+        BPP->>Agmarknet: GET /v1/fetch-agmarknet-vistaar-location?commodity_id&token&date&lat&long
+        Agmarknet-->>BPP: price records (or 4xx/5xx)
+        BPP->>BPP: buildMandiCatalog(records)
         BPP-->>Client: on_search (catalog with providers/items)
     end
 ```
@@ -69,9 +67,9 @@ sequenceDiagram
 
 **Required request parameters.** All of the following must be present in `message.intent.fulfillment.stops[0]`. If any is missing, the provider returns **on_search** with an empty catalog and logs a warning.
 
-- **location** — At `fulfillment.stops[0].location`. Provide either `lat` and `lon` (strings) or `gps` as `"lat,lon"`. These coordinates are passed to `get_markets_at_point(lat, lon)` to resolve which markets cover the point.
-- **time.range** — At `fulfillment.stops[0].time.range`. Both `start` and `end` (ISO date strings) are required. They are converted to dd-MM-yyyy and sent to the Agmarknet API as from_date and to_date.
-- **commoditycode** — At `fulfillment.stops[0].commoditycode`. Must be a number (e.g. `2` for Paddy). This value is sent to Agmarknet for each market.
+- **location** — At `fulfillment.stops[0].location`. Provide either `lat` and `lon` (strings) or `gps` as `"lat,lon"`. These coordinates are passed to AGMARKNET location API as `lat` and `long`.
+- **time.range** — At `fulfillment.stops[0].time.range`. Both `start` and `end` (ISO date strings) are required. They are converted to dd-MM-yyyy; `end` is used as `date` for AGMARKNET (with `start` fallback).
+- **commoditycode** — At `fulfillment.stops[0].commoditycode`. Must be a number (e.g. `2` for Paddy). This is mapped to AGMARKNET `commodity_id`.
 
 **Example request (relevant parts):**
 
@@ -118,11 +116,11 @@ sequenceDiagram
 
 1. **Validation.** If `lat`/`lon`, `time.range.start`/`end`, or `commoditycode` is missing, the provider returns **on_search** with `message.catalog.descriptor.name` = `"Mandi Price Discovery"`, `providers: []`, and logs which field is missing.
 
-2. **Resolve markets.** The provider calls the DB: `get_markets_at_point(lat, lon)`. The result is a list of markets with state_code, district_code, market_code, etc., which the code maps to statecode, districtcode, marketcode.
+2. **Generate token.** The provider calls `POST {MANDI_BASE_URL}/v1/generate-dynamic-token-agmarknet` with `access_name` and `password`.
 
-3. **Fetch prices.** For each market row the provider calls the Agmarknet Vistaar API: GET `{MANDI_BASE_URL}/v1/fetch-agmarknet-vistaar` with query params token, statecode, from_date, to_date, commoditycode, districtcode, marketcode. The dates come from `time.range.start`/`end` converted to dd-MM-yyyy; commoditycode comes from the request (same for all markets). If a call returns 400 or 5xx, that market is skipped (and logged); the rest are still processed.
+3. **Fetch prices by location.** The provider calls `GET {MANDI_BASE_URL}/v1/fetch-agmarknet-vistaar-location` with query params `commodity_id`, `token`, `date`, `lat`, `long`.
 
-4. **Build catalog.** All successful API responses are aggregated. The provider builds one provider **"Mandi Price Discovery"** with one catalog item per price record. Each item has tags for State, District, Market, Commodity, Modal Price, Min Price, Max Price, Price Unit, Arrival Date, and when present Grade, Group, Variety (from the Agmarknet response).
+4. **Build catalog.** The provider builds one provider **"Mandi Price Discovery"** with one catalog item per price record. Each item has tags for State, District, Market, Commodity, Modal Price, Min Price, Max Price, Price Unit, Arrival Date, and when present Grade, Group, Variety.
 
 5. **Response.** The provider returns **on_search** with `context.action` = `"on_search"` and `message.catalog` (descriptor plus providers with items).
 
@@ -130,27 +128,21 @@ sequenceDiagram
 
 ## Data Flow
 
-### DB: get_markets_at_point(lat, lon)
+### AGMARKNET Token API
 
-The provider uses a PostgreSQL function that returns markets containing the given point (e.g. polygon/geometry based). The query selects:
+- **Method:** POST  
+- **URL:** `{MANDI_BASE_URL}/v1/generate-dynamic-token-agmarknet`  
+- **Body:** `{"access_name":"...","password":"..."}`  
+- **Response:** token string at `response.token`
 
-- `state_code` as stateCode → mapped to **statecode**
-- `state` → **state**
-- `district_code` as districtCode → **districtcode**
-- `district_name` as district → **district_name**
-- `market_code` as marketCode → **marketcode**
-- `market_name` as marketName (optional, for display)
-
-The **statecode**, **districtcode**, and **marketcode** sent to Agmarknet must use the same scheme the API expects; otherwise the API may return 400 for that market.
-
-### Agmarknet Vistaar API
+### AGMARKNET Location API
 
 - **Method:** GET  
-- **URL:** `{MANDI_BASE_URL}/v1/fetch-agmarknet-vistaar`  
-- **Query params:** token, statecode, from_date, to_date, commoditycode, districtcode, marketcode  
+- **URL:** `{MANDI_BASE_URL}/v1/fetch-agmarknet-vistaar-location`  
+- **Query params:** `commodity_id`, `token`, `date`, `lat`, `long`  
 - **Date format:** dd-MM-yyyy (e.g. `20-08-2025`)  
-- **Example (working):**  
-  `...?token=***&statecode=CG&from_date=20-08-2025&to_date=20-08-2025&commoditycode=2&districtcode=96&marketcode=2056`
+- **Example:**  
+  `...?commodity_id=2&token=***&date=20-08-2025&lat=21.6571&long=82.1612`
 
 **Example API response (array of records):**
 
@@ -186,15 +178,16 @@ The **statecode**, **districtcode**, and **marketcode** sent to Agmarknet must u
 
 ## When Required Params Are Missing
 
-If any of **location (lat/lon)**, **time.range.start**, **time.range.end**, or **commoditycode** is missing, the provider does not call the DB or Agmarknet. It returns **on_search** with `context.action` = `"on_search"` and `message.catalog` = `{ descriptor: { name: "Mandi Price Discovery" }, providers: [] }`, and logs a warning indicating which required parameter is missing.
+If any of **location (lat/lon)**, **time.range.start**, **time.range.end**, or **commoditycode** is missing, the provider does not call AGMARKNET. It returns **on_search** with `context.action` = `"on_search"` and `message.catalog` = `{ descriptor: { name: "Mandi Price Discovery" }, providers: [] }`, and logs a warning indicating which required parameter is missing.
 
 ---
 
 ## Environment / Config
 
 - **MANDI_BASE_URL** — Base URL for the Agmarknet Vistaar API (e.g. `http://34.0.4.235:8080`).
-- **MANDI_TOKEN** — Token for API auth (sent as query param `token`).
-- **IMD_DB_*** / **WEATHER_DB_*** — Database connection used for `get_markets_at_point` (same pool as weather/IMD).
+- **MANDI_ACCESS_NAME** — Access name for dynamic token generation.
+- **MANDI_PASSWORD** — Password for dynamic token generation.
+- **MANDI_TOKEN** — Optional fallback token if token generation fails.
 
 ---
 
@@ -202,4 +195,4 @@ If any of **location (lat/lon)**, **time.range.start**, **time.range.end**, or *
 
 **Single step:** POST `/mobility/search` with intent category code `price-discovery` and item code `mandi`. In `fulfillment.stops[0]` provide location (lat, lon), time.range (start, end), and commoditycode (number).
 
-**Response.** The provider always returns **on_search** with `message.catalog`. If validation fails or there are no markets/prices, the catalog is empty; otherwise it contains one provider with items built from Agmarknet price records.
+**Response.** The provider always returns **on_search** with `message.catalog`. If validation fails or there are no records, the catalog is empty; otherwise it contains one provider with items built from AGMARKNET location price records.
