@@ -22,6 +22,7 @@ import { GfrService } from "./services/gfr/gfr.service";
 import { PmkisanGrievanceService } from "./services/pmkisan-grievance/pmkisan-grievance.service";
 import { PmfbyGrievanceService } from "./services/pmfby/pmfby-greviance.service";
 import { SathiService } from "./services/sathi/sathi.service";
+import { SmamService } from "./services/smam/smam.service";
 
 @Controller("")
 export class AppController {
@@ -33,6 +34,7 @@ export class AppController {
     private readonly pmkisanGrievanceService: PmkisanGrievanceService,
     private readonly pmfbyGrievanceService: PmfbyGrievanceService,
     private readonly sathiSeedService: SathiService,
+    private readonly smamService: SmamService,
   ) {}
 
   @Get()
@@ -138,6 +140,9 @@ export class AppController {
       case "sathi-seed":
         console.log("INSIDE SATHI SEED AVAILABILITY SEARCH...");
         return this.sathiSeedService.getSeedAvailability(body);
+      case "smam":
+        console.log("INSIDE SMAM SEARCH...");
+        return this.smamService.searchSMAMBenfitData(body);
 
       default:
         return this.appService.searchForIntentQuery(body);
@@ -160,6 +165,7 @@ export class AppController {
     const gfrProviderId =
       body?.message?.order?.provider?.id ??
       body?.message?.intent?.provider?.id;
+    const providerId = gfrProviderId?.toLowerCase();
     const itemDescriptorCode =
       body?.message?.intent?.item?.descriptor?.code?.toLowerCase();
 
@@ -193,7 +199,9 @@ export class AppController {
       case categoryCode === "price-discovery":
         return itemDescriptorCode === "mandi" ? "mandi" : "unknown";
       case gfrProviderId === "sathi-seed":
-          return "sathi-seed";
+        return "sathi-seed";
+      case providerId === "smam":
+        return "smam";
       default:
         return "unknown";
     }
