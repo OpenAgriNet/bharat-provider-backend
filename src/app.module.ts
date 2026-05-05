@@ -19,6 +19,7 @@ import { MandiService } from "./services/mandi/mandi.service";
 import { GfrService } from "./services/gfr/gfr.service";
 import { PmkisanGrievanceService } from "./services/pmkisan-grievance/pmkisan-grievance.service";
 import { SathiService } from "./services/sathi/sathi.service";
+import { SmamService } from "./services/smam/smam.service";
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { SathiService } from "./services/sathi/sathi.service";
     PmkisanGrievanceService,
     PmfbyGrievanceService,
     SathiService,
+    SmamService,
   ],
 })
 export class AppModule {}
