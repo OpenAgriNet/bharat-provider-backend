@@ -103,6 +103,12 @@ export class SmamService {
       this.logger.log(
         `[SMAM] API success=${smamPayload?.success}, message=${smamPayload?.message}`,
       );
+      this.logger.log(
+        `[SMAM] Raw API response payload: ${JSON.stringify(smamPayload)}`,
+      );
+      this.logger.log(
+        `[SMAM] Parsed data count=${Array.isArray(parsedData) ? parsedData.length : 0}, parsedData=${JSON.stringify(parsedData)}`,
+      );
 
       return {
         context: {
