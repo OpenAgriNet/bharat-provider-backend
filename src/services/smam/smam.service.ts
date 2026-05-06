@@ -12,7 +12,15 @@ export class SmamService {
     return (
       this.configService.get<string>("SMAM_BASE_URL") ||
       process.env.SMAM_BASE_URL ||
-      "https://agrimachinery.nic.in"
+      ""
+    );
+  }
+
+  private getToken(): string {
+    return (
+      this.configService.get<string>("SMAM_TOKEN") ||
+      process.env.SMAM_TOKEN ||
+      ""
     );
   }
 
@@ -45,6 +53,7 @@ export class SmamService {
     const searchType = this.getSearchType(body);
     const searchValue = this.getSearchValue(body);
     const baseUrl = this.getBaseUrl();
+    const smamToken = this.getToken();
     const allowedSearchTypes = new Set([
       "application_no",
       "phone_no",
@@ -82,7 +91,6 @@ export class SmamService {
     }
 
     const url = `${baseUrl.replace(/\/$/, "")}/api/BeneficiaryService/GetApplicationStatusByAI`;
-    const token = "E6A12F822C27D4570C38969C434AF0EE";
 
     try {
       const response = await axios.post(
@@ -90,7 +98,7 @@ export class SmamService {
         { SearchValue: searchValue },
         {
           headers: {
-            Token: token,
+            Token: smamToken,
             "Content-Type": "application/json",
           },
           timeout: 30000,
@@ -178,7 +186,7 @@ export class SmamService {
             providers: [
               {
                 id: "smam",
-                descriptor: { name: "SMAM", code: "smam" },
+                descriptor: { name: "SMAM" },
                 items,  // ← individual items per implement, not one blob
               },
             ],
