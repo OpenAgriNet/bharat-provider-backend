@@ -167,7 +167,7 @@ export class SmamService {
                           },
                           {
                             descriptor: { code: "data", name: "Data" },
-                            value: JSON.stringify(parsedData),
+                            value: smamPayload,
                           },
                         ],
                       },
