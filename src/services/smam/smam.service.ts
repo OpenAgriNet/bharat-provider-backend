@@ -83,7 +83,7 @@ export class SmamService {
 
     if (!searchValue) {
       this.logger.warn("[SMAM] Missing search_value in request payload.");
-      return this.buildEmptyResponse(context);
+      return this.buildEmptyResponse(context, normalizedSearchType, searchValue);
     }
 
     const url = `${baseUrl.replace(/\/$/, "")}/api/BeneficiaryService/GetApplicationStatusByAI`;
@@ -91,6 +91,10 @@ export class SmamService {
 
     const timeoutMs = this.getApiTimeoutMs();
     this.logger.log(`[SMAM] Request timeout set to ${timeoutMs}ms`);
+
+    let apiStatus = "Failed";
+    let apiMessage = "";
+    let applications: any[] = [];
 
     try {
       const response = await axios.post(
@@ -110,155 +114,124 @@ export class SmamService {
       this.logger.log(`[SMAM] smamPayload.success: ${smamPayload?.success}`);
       this.logger.log(`[SMAM] smamPayload.message: ${smamPayload?.message}`);
       this.logger.log(`[SMAM] smamPayload.data type: ${typeof smamPayload?.data}`);
-      this.logger.log(`[SMAM] smamPayload.data raw: ${smamPayload?.data}`);
 
+      apiMessage = smamPayload?.message ?? "";
+
+      // Parse `data` — the SMAM API returns it as a JSON string inside the response body.
+      // axios may auto-parse it as an array if the Content-Type is application/json,
+      // so handle both cases defensively.
       let parsedData: any[] = [];
       try {
-        parsedData = smamPayload?.data ? JSON.parse(smamPayload.data) : [];
+        if (!smamPayload?.data) {
+          this.logger.log("[SMAM] data field is empty/null — treating as empty array.");
+          parsedData = [];
+        } else if (Array.isArray(smamPayload.data)) {
+          this.logger.log("[SMAM] data field is already a parsed array.");
+          parsedData = smamPayload.data;
+        } else if (typeof smamPayload.data === "object") {
+          this.logger.log("[SMAM] data field is a parsed object — wrapping in array.");
+          parsedData = [smamPayload.data];
+        } else {
+          this.logger.log("[SMAM] data field is a string — calling JSON.parse.");
+          parsedData = JSON.parse(smamPayload.data);
+        }
       } catch (parseError) {
         this.logger.error(`[SMAM] JSON.parse failed: ${parseError.message}`);
-        return this.buildErrorResponse(body, "parse_error", `Failed to parse SMAM data: ${parseError.message}`);
+        return this.buildErrorResponse(context, normalizedSearchType, searchValue, "parse_error", `Failed to parse SMAM data: ${parseError.message}`);
       }
 
       this.logger.log(`[SMAM] parsedData isArray: ${Array.isArray(parsedData)}, length: ${parsedData.length}`);
 
-      const applications: any[] = Array.isArray(parsedData) ? parsedData : [];
+      applications = Array.isArray(parsedData) ? parsedData : [];
+      apiStatus = smamPayload?.success ? "Success" : "Failed";
 
       if (applications.length === 0) {
         this.logger.warn("[SMAM] No applications found in parsed data.");
-        return this.buildEmptyResponse(context);
+        return this.buildEmptyResponse(context, normalizedSearchType, searchValue, apiMessage);
       }
 
       this.logger.log(`[SMAM] applications[0] keys: ${JSON.stringify(Object.keys(applications[0] ?? {}))}`);
       this.logger.log(`[SMAM] applications[0].Implements length: ${applications[0]?.Implements?.length ?? 0}`);
 
-      const items = applications.flatMap((app: any) =>
-        (app.Implements ?? []).map((impl: any) => {
-          const latestStatus = impl.StatusHistory?.[0] ?? {};
-
-          return {
-            id: String(app.ApplicationID),
-            descriptor: {
-              name: app.ApplicationRefNo,
-              long_desc: impl.ImplementName,
-            },
-            tags: [
-              {
-                descriptor: {
-                  code: "smam-application-status",
-                  name: "SMAM Application Status",
-                },
-                list: [
-                  {
-                    descriptor: { code: "application_id", name: "Application ID" },
-                    value: String(app.ApplicationID),
-                  },
-                  {
-                    descriptor: { code: "application_ref_no", name: "Application Ref No" },
-                    value: app.ApplicationRefNo ?? "",
-                  },
-                  {
-                    descriptor: { code: "implement_name", name: "Implement Name" },
-                    value: impl.ImplementName ?? "",
-                  },
-                  {
-                    descriptor: { code: "implement_subsidy_id", name: "Implement Subsidy ID" },
-                    value: String(impl.ImplementSubsidyID),
-                  },
-                  {
-                    descriptor: { code: "current_status_code", name: "Current Status Code" },
-                    value: String(latestStatus.StatusCode ?? ""),
-                  },
-                  {
-                    descriptor: { code: "current_status_text", name: "Current Status" },
-                    value: latestStatus.StatusText ?? "",
-                  },
-                  {
-                    descriptor: { code: "current_status_date", name: "Status Date" },
-                    value: latestStatus.StatusDate ?? "",
-                  },
-                  {
-                    descriptor: { code: "status_history", name: "Status History" },
-                    value: JSON.stringify(impl.StatusHistory ?? []),
-                  },
-                  {
-                    descriptor: { code: "search_type", name: "Search Type" },
-                    value: normalizedSearchType,
-                  },
-                  {
-                    descriptor: { code: "search_value", name: "Search Value" },
-                    value: searchValue,
-                  },
-                ],
-              },
-            ],
-          };
-        }),
-      );
-
-      this.logger.log(`[SMAM] Final items count: ${items.length}`);
-
-      // Pass through SMAM API shape (data as parsed JSON array) alongside Beckn catalog.
-      const smamApiMirror = {
-        success: !!smamPayload?.success,
-        message: smamPayload?.message ?? "",
-        data: applications,
-      };
-      this.logger.log(
-        `[SMAM] Returning on_search with SMAM API mirror: success=${smamApiMirror.success}, dataLength=${applications.length}`,
-      );
-
-      return {
-        context: {
-          ...context,
-          action: "on_search",
-          timestamp: new Date().toISOString(),
-        },
-        message: {
-          catalog: {
-            descriptor: { name: "SMAM Application Status" , code: "smam"},
-            tags: [
-              {
-                descriptor: {
-                  code: "search-context",
-                  name: "Search Context",
-                },
-                list: [
-                  {
-                    descriptor: { code: "success", name: "Success" },
-                    value: String(smamApiMirror.success),
-                  },
-                  {
-                    descriptor: { code: "message", name: "Message" },
-                    value: smamApiMirror.message,
-                  },
-                  {
-                    descriptor: { code: "data", name: "Data" },
-                    value: JSON.stringify(smamApiMirror.data),
-                  },
-                ],
-              },
-            ],
-            providers: [
-              {
-                id: "smam",
-                descriptor: { name: "SMAM" },
-                items,
-              },
-            ],
-          },
-        },
-      };
     } catch (error) {
       this.logger.error(
         `[SMAM] API call failed: ${error.message}`,
         error?.response?.data ?? "",
       );
-      return this.buildErrorResponse(body, "api_error", error.message);
+      apiMessage = error.message;
+      return this.buildErrorResponse(context, normalizedSearchType, searchValue, "api_error", error.message);
     }
-  }
 
-  private buildEmptyResponse(context: any) {
+    // ── Build Beckn on_search catalog (Sathi-style) ──────────────────────────
+    // Each application → one provider; each implement → one item under that provider.
+    const providers = applications.map((app: any) => {
+      const implements_: any[] = app.Implements ?? [];
+
+      const items = implements_.map((impl: any) => {
+        const statusHistory: any[] = impl.StatusHistory ?? [];
+        const latestStatus = statusHistory[0] ?? {};
+
+        return {
+          id: String(impl.ImplementSubsidyID),
+          descriptor: {
+            name: impl.ImplementName ?? "",
+            code: String(impl.ImplementSubsidyID),
+          },
+          tags: [
+            {
+              descriptor: {
+                code: "implement-status",
+                name: "Implement Status",
+              },
+              list: [
+                {
+                  descriptor: { code: "current-status-code", name: "Current Status Code" },
+                  value: String(latestStatus.StatusCode ?? ""),
+                },
+                {
+                  descriptor: { code: "current-status-text", name: "Current Status" },
+                  value: latestStatus.StatusText ?? "",
+                },
+                {
+                  descriptor: { code: "current-status-date", name: "Status Date" },
+                  value: latestStatus.StatusDate ?? "",
+                },
+              ],
+            },
+            {
+              descriptor: {
+                code: "status-history",
+                name: "Status History",
+              },
+              list: statusHistory.map((hist: any, idx: number) => ({
+                descriptor: {
+                  code: `history-${idx + 1}`,
+                  name: `Step ${idx + 1}`,
+                },
+                value: JSON.stringify({
+                  status_code: hist.StatusCode,
+                  status_text: hist.StatusText,
+                  status_date: hist.StatusDate,
+                }),
+              })),
+            },
+          ],
+        };
+      });
+
+      return {
+        id: String(app.ApplicationID),
+        descriptor: {
+          name: app.ApplicationRefNo ?? String(app.ApplicationID),
+          code: String(app.ApplicationID),
+        },
+        items,
+      };
+    });
+
+    const totalItems = providers.reduce((sum: number, p: any) => sum + (p.items?.length ?? 0), 0);
+    this.logger.log(`[SMAM] Built ${providers.length} provider(s) with ${totalItems} item(s) total.`);
+
     return {
       context: {
         ...context,
@@ -267,43 +240,92 @@ export class SmamService {
       },
       message: {
         catalog: {
-          descriptor: { name: "SMAM Application Status" },
+          descriptor: {
+            name: "SMAM Application Status",
+            code: "smam",
+          },
+          tags: [
+            {
+              descriptor: {
+                code: "search-context",
+                name: "Search Context",
+              },
+              list: [
+                {
+                  descriptor: { code: "status", name: "Status" },
+                  value: apiStatus,
+                },
+                {
+                  descriptor: { code: "message", name: "Message" },
+                  value: apiMessage,
+                },
+                {
+                  descriptor: { code: "search-type", name: "Search Type" },
+                  value: normalizedSearchType,
+                },
+                {
+                  descriptor: { code: "search-value", name: "Search Value" },
+                  value: searchValue,
+                },
+              ],
+            },
+          ],
+          providers,
+        },
+      },
+    };
+  }
+
+  private buildEmptyResponse(context: any, searchType = "", searchValue = "", message = "") {
+    return {
+      context: {
+        ...context,
+        action: "on_search",
+        timestamp: new Date().toISOString(),
+      },
+      message: {
+        catalog: {
+          descriptor: { name: "SMAM Application Status", code: "smam" },
+          tags: [
+            {
+              descriptor: { code: "search-context", name: "Search Context" },
+              list: [
+                { descriptor: { code: "status", name: "Status" }, value: "Failed" },
+                { descriptor: { code: "message", name: "Message" }, value: message || "No applications found" },
+                { descriptor: { code: "search-type", name: "Search Type" }, value: searchType },
+                { descriptor: { code: "search-value", name: "Search Value" }, value: searchValue },
+              ],
+            },
+          ],
           providers: [],
         },
       },
     };
   }
 
-  private buildErrorResponse(body: any, code: string, message: string) {
+  private buildErrorResponse(context: any, searchType = "", searchValue = "", code: string, message: string) {
     return {
       context: {
-        ...body?.context,
+        ...context,
         action: "on_search",
         timestamp: new Date().toISOString(),
       },
       message: {
         catalog: {
-          descriptor: { name: "SMAM Application Status" },
-          providers: [
+          descriptor: { name: "SMAM Application Status", code: "smam" },
+          tags: [
             {
-              id: "smam",
-              descriptor: { name: "SMAM" },
-              items: [
-                {
-                  id: "error",
-                  descriptor: { name: "Error", short_desc: message },
-                  tags: [
-                    {
-                      descriptor: { code },
-                      list: [
-                        { descriptor: { code: "message" }, value: message },
-                      ],
-                    },
-                  ],
-                },
+              descriptor: { code: "search-context", name: "Search Context" },
+              list: [
+                { descriptor: { code: "status", name: "Status" }, value: "Failed" },
+                { descriptor: { code: "message", name: "Message" }, value: message },
+                { descriptor: { code: "error-code", name: "Error Code" }, value: code },
+                { descriptor: { code: "search-type", name: "Search Type" }, value: searchType },
+                { descriptor: { code: "search-value", name: "Search Value" }, value: searchValue },
               ],
             },
           ],
+          providers: [],
         },
       },
     };
