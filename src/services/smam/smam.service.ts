@@ -6,7 +6,7 @@ import axios from "axios";
 export class SmamService {
   private readonly logger = new Logger(SmamService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) { }
 
   private getBaseUrl(): string {
     return (
@@ -100,14 +100,70 @@ export class SmamService {
       const smamPayload = response?.data ?? {};
       const parsedData = smamPayload?.data ? JSON.parse(smamPayload.data) : [];
 
-      this.logger.log(
-        `[SMAM] API success=${smamPayload?.success}, message=${smamPayload?.message}`,
-      );
-      this.logger.log(
-        `[SMAM] Raw API response payload: ${JSON.stringify(smamPayload)}`,
-      );
-      this.logger.log(
-        `[SMAM] Parsed data count=${Array.isArray(parsedData) ? parsedData.length : 0}, parsedData=${JSON.stringify(parsedData)}`,
+      const applications: any[] = Array.isArray(parsedData) ? parsedData : [];
+
+      const items = applications.flatMap((app: any) =>
+        (app.Implements ?? []).map((impl: any) => {
+          const latestStatus = impl.StatusHistory?.[0] ?? {};
+
+          return {
+            id: String(app.ApplicationID),
+            descriptor: {
+              name: app.ApplicationRefNo,
+              long_desc: impl.ImplementName,
+            },
+            tags: [
+              {
+                descriptor: {
+                  code: "smam-application-status",
+                  name: "SMAM Application Status",
+                },
+                list: [
+                  {
+                    descriptor: { code: "application_id", name: "Application ID" },
+                    value: String(app.ApplicationID),
+                  },
+                  {
+                    descriptor: { code: "application_ref_no", name: "Application Ref No" },
+                    value: app.ApplicationRefNo ?? "",
+                  },
+                  {
+                    descriptor: { code: "implement_name", name: "Implement Name" },
+                    value: impl.ImplementName ?? "",
+                  },
+                  {
+                    descriptor: { code: "implement_subsidy_id", name: "Implement Subsidy ID" },
+                    value: String(impl.ImplementSubsidyID),
+                  },
+                  {
+                    descriptor: { code: "current_status_code", name: "Current Status Code" },
+                    value: String(latestStatus.StatusCode ?? ""),
+                  },
+                  {
+                    descriptor: { code: "current_status_text", name: "Current Status" },
+                    value: latestStatus.StatusText ?? "",
+                  },
+                  {
+                    descriptor: { code: "current_status_date", name: "Status Date" },
+                    value: latestStatus.StatusDate ?? "",
+                  },
+                  {
+                    descriptor: { code: "status_history", name: "Status History" },
+                    value: JSON.stringify(impl.StatusHistory ?? []),
+                  },
+                  {
+                    descriptor: { code: "search_type", name: "Search Type" },
+                    value: normalizedSearchType,
+                  },
+                  {
+                    descriptor: { code: "search_value", name: "Search Value" },
+                    value: searchValue,
+                  },
+                ],
+              },
+            ],
+          };
+        })
       );
 
       const onSearchResponse = {
@@ -118,67 +174,18 @@ export class SmamService {
         },
         message: {
           catalog: {
-            descriptor: {
-              name: "SMAM Application Status",
-              code: "smam",
-            },
+            descriptor: { name: "SMAM Application Status", code: "smam" },
             providers: [
               {
                 id: "smam",
-                descriptor: {
-                  name: "SMAM",
-                  code: "smam",
-                },
-                items: [
-                  {
-                    id: searchValue,
-                    descriptor: {
-                      name: "application_status",
-                      code: "application_status",
-                    },
-                    tags: [
-                      {
-                        descriptor: {
-                          code: "smam-application-status",
-                          name: "SMAM Application Status",
-                        },
-                        list: [
-                          {
-                            descriptor: { code: "success", name: "Success" },
-                            value: String(!!smamPayload?.success),
-                          },
-                          {
-                            descriptor: { code: "message", name: "Message" },
-                            value: smamPayload?.message ?? "",
-                          },
-                          {
-                            descriptor: {
-                              code: "search_type",
-                              name: "Search Type",
-                            },
-                            value: normalizedSearchType,
-                          },
-                          {
-                            descriptor: {
-                              code: "search_value",
-                              name: "Search Value",
-                            },
-                            value: searchValue,
-                          },
-                          {
-                            descriptor: { code: "data", name: "Data" },
-                            value: smamPayload,
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                ],
+                descriptor: { name: "SMAM", code: "smam" },
+                items,  // ← individual items per implement, not one blob
               },
             ],
           },
         },
       };
+
       return onSearchResponse;
     } catch (error) {
       this.logger.error(
