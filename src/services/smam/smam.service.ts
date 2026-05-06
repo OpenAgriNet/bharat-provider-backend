@@ -24,6 +24,15 @@ export class SmamService {
     );
   }
 
+  /** SMAM API often responds in ~15s; default 45s to avoid client/proxy timeouts cutting us off first. */
+  private getApiTimeoutMs(): number {
+    const raw =
+      this.configService.get<string>("SMAM_API_TIMEOUT_MS") ||
+      process.env.SMAM_API_TIMEOUT_MS;
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 45000;
+  }
+
   private getSearchValue(body: any): string {
     const searchTag = body?.message?.intent?.item?.tags?.find(
       (tag: any) => tag?.descriptor?.code === "search_params",
@@ -80,6 +89,9 @@ export class SmamService {
     const url = `${baseUrl.replace(/\/$/, "")}/api/BeneficiaryService/GetApplicationStatusByAI`;
     this.logger.log(`[SMAM] Calling URL: ${url} with SearchValue=${searchValue}`);
 
+    const timeoutMs = this.getApiTimeoutMs();
+    this.logger.log(`[SMAM] Request timeout set to ${timeoutMs}ms`);
+
     try {
       const response = await axios.post(
         url,
@@ -89,7 +101,7 @@ export class SmamService {
             Token: smamToken,
             "Content-Type": "application/json",
           },
-          timeout: 30000,
+          timeout: timeoutMs,
         },
       );
 
@@ -186,6 +198,16 @@ export class SmamService {
 
       this.logger.log(`[SMAM] Final items count: ${items.length}`);
 
+      // Pass through SMAM API shape (data as parsed JSON array) alongside Beckn catalog.
+      const smamApiMirror = {
+        success: !!smamPayload?.success,
+        message: smamPayload?.message ?? "",
+        data: applications,
+      };
+      this.logger.log(
+        `[SMAM] Returning on_search with SMAM API mirror: success=${smamApiMirror.success}, dataLength=${applications.length}`,
+      );
+
       return {
         context: {
           ...context,
@@ -195,6 +217,28 @@ export class SmamService {
         message: {
           catalog: {
             descriptor: { name: "SMAM Application Status" },
+            tags: [
+              {
+                descriptor: {
+                  code: "smam-api-response",
+                  name: "SMAM API Response (passthrough)",
+                },
+                list: [
+                  {
+                    descriptor: { code: "success", name: "Success" },
+                    value: String(smamApiMirror.success),
+                  },
+                  {
+                    descriptor: { code: "message", name: "Message" },
+                    value: smamApiMirror.message,
+                  },
+                  {
+                    descriptor: { code: "data", name: "Data" },
+                    value: JSON.stringify(smamApiMirror.data),
+                  },
+                ],
+              },
+            ],
             providers: [
               {
                 id: "smam",
