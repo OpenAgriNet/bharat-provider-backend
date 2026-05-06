@@ -6,7 +6,7 @@ import axios from "axios";
 export class SmamService {
   private readonly logger = new Logger(SmamService.name);
 
-  constructor(private readonly configService: ConfigService) { }
+  constructor(private readonly configService: ConfigService) {}
 
   private getBaseUrl(): string {
     return (
@@ -28,7 +28,6 @@ export class SmamService {
     const searchTag = body?.message?.intent?.item?.tags?.find(
       (tag: any) => tag?.descriptor?.code === "search_params",
     );
-
     return (
       searchTag?.list?.find(
         (entry: any) => entry?.descriptor?.code === "search_value",
@@ -40,7 +39,6 @@ export class SmamService {
     const searchTag = body?.message?.intent?.item?.tags?.find(
       (tag: any) => tag?.descriptor?.code === "search_params",
     );
-
     return (
       searchTag?.list
         ?.find((entry: any) => entry?.descriptor?.code === "search_type")
@@ -54,6 +52,7 @@ export class SmamService {
     const searchValue = this.getSearchValue(body);
     const baseUrl = this.getBaseUrl();
     const smamToken = this.getToken();
+
     const allowedSearchTypes = new Set([
       "application_no",
       "phone_no",
@@ -64,33 +63,22 @@ export class SmamService {
       : "application_no";
 
     this.logger.log(
-      `[SMAM] Received search request for provider=${body?.message?.intent?.provider?.id ?? ""}, searchType=${normalizedSearchType}, searchValue=${searchValue}`,
+      `[SMAM] Received search request — provider=${body?.message?.intent?.provider?.id ?? ""}, searchType=${normalizedSearchType}, searchValue=${searchValue}`,
     );
 
     if (searchType && !allowedSearchTypes.has(searchType)) {
       this.logger.warn(
-        `[SMAM] Unsupported search_type=${searchType}. Falling back to application_no`,
+        `[SMAM] Unsupported search_type="${searchType}". Falling back to application_no`,
       );
     }
 
     if (!searchValue) {
       this.logger.warn("[SMAM] Missing search_value in request payload.");
-      return {
-        context: {
-          ...context,
-          action: "on_search",
-          timestamp: new Date().toISOString(),
-        },
-        message: {
-          catalog: {
-            descriptor: { name: "SMAM Application Status", code: "smam" },
-            providers: [],
-          },
-        },
-      };
+      return this.buildEmptyResponse(context);
     }
 
     const url = `${baseUrl.replace(/\/$/, "")}/api/BeneficiaryService/GetApplicationStatusByAI`;
+    this.logger.log(`[SMAM] Calling URL: ${url} with SearchValue=${searchValue}`);
 
     try {
       const response = await axios.post(
@@ -106,9 +94,31 @@ export class SmamService {
       );
 
       const smamPayload = response?.data ?? {};
-      const parsedData = smamPayload?.data ? JSON.parse(smamPayload.data) : [];
+
+      this.logger.log(`[SMAM] smamPayload.success: ${smamPayload?.success}`);
+      this.logger.log(`[SMAM] smamPayload.message: ${smamPayload?.message}`);
+      this.logger.log(`[SMAM] smamPayload.data type: ${typeof smamPayload?.data}`);
+      this.logger.log(`[SMAM] smamPayload.data raw: ${smamPayload?.data}`);
+
+      let parsedData: any[] = [];
+      try {
+        parsedData = smamPayload?.data ? JSON.parse(smamPayload.data) : [];
+      } catch (parseError) {
+        this.logger.error(`[SMAM] JSON.parse failed: ${parseError.message}`);
+        return this.buildErrorResponse(body, "parse_error", `Failed to parse SMAM data: ${parseError.message}`);
+      }
+
+      this.logger.log(`[SMAM] parsedData isArray: ${Array.isArray(parsedData)}, length: ${parsedData.length}`);
 
       const applications: any[] = Array.isArray(parsedData) ? parsedData : [];
+
+      if (applications.length === 0) {
+        this.logger.warn("[SMAM] No applications found in parsed data.");
+        return this.buildEmptyResponse(context);
+      }
+
+      this.logger.log(`[SMAM] applications[0] keys: ${JSON.stringify(Object.keys(applications[0] ?? {}))}`);
+      this.logger.log(`[SMAM] applications[0].Implements length: ${applications[0]?.Implements?.length ?? 0}`);
 
       const items = applications.flatMap((app: any) =>
         (app.Implements ?? []).map((impl: any) => {
@@ -171,35 +181,10 @@ export class SmamService {
               },
             ],
           };
-        })
+        }),
       );
 
-      const onSearchResponse = {
-        context: {
-          ...context,
-          action: "on_search",
-          timestamp: new Date().toISOString(),
-        },
-        message: {
-          catalog: {
-            descriptor: { name: "SMAM Application Status", code: "smam" },
-            providers: [
-              {
-                id: "smam",
-                descriptor: { name: "SMAM" },
-                items,  // ← individual items per implement, not one blob
-              },
-            ],
-          },
-        },
-      };
-
-      return onSearchResponse;
-    } catch (error) {
-      this.logger.error(
-        `[SMAM] API call failed: ${error.message}`,
-        error?.response?.data ?? "",
-      );
+      this.logger.log(`[SMAM] Final items count: ${items.length}`);
 
       return {
         context: {
@@ -209,22 +194,74 @@ export class SmamService {
         },
         message: {
           catalog: {
-            descriptor: { name: "SMAM Application Status", code: "smam" },
-            providers: [],
-            tags: [
+            descriptor: { name: "SMAM Application Status" },
+            providers: [
               {
-                descriptor: { code: "smam-error", name: "SMAM Error" },
-                list: [
-                  {
-                    descriptor: { code: "message", name: "Message" },
-                    value: error?.message ?? "SMAM API call failed",
-                  },
-                ],
+                id: "smam",
+                descriptor: { name: "SMAM" },
+                items,
               },
             ],
           },
         },
       };
+    } catch (error) {
+      this.logger.error(
+        `[SMAM] API call failed: ${error.message}`,
+        error?.response?.data ?? "",
+      );
+      return this.buildErrorResponse(body, "api_error", error.message);
     }
+  }
+
+  private buildEmptyResponse(context: any) {
+    return {
+      context: {
+        ...context,
+        action: "on_search",
+        timestamp: new Date().toISOString(),
+      },
+      message: {
+        catalog: {
+          descriptor: { name: "SMAM Application Status" },
+          providers: [],
+        },
+      },
+    };
+  }
+
+  private buildErrorResponse(body: any, code: string, message: string) {
+    return {
+      context: {
+        ...body?.context,
+        action: "on_search",
+        timestamp: new Date().toISOString(),
+      },
+      message: {
+        catalog: {
+          descriptor: { name: "SMAM Application Status" },
+          providers: [
+            {
+              id: "smam",
+              descriptor: { name: "SMAM" },
+              items: [
+                {
+                  id: "error",
+                  descriptor: { name: "Error", short_desc: message },
+                  tags: [
+                    {
+                      descriptor: { code },
+                      list: [
+                        { descriptor: { code: "message" }, value: message },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
   }
 }
