@@ -216,12 +216,12 @@ export class SmamService {
         },
         message: {
           catalog: {
-            descriptor: { name: "SMAM Application Status" },
+            descriptor: { name: "SMAM Application Status" , code: "smam"},
             tags: [
               {
                 descriptor: {
-                  code: "smam-api-response",
-                  name: "SMAM API Response (passthrough)",
+                  code: "search-context",
+                  name: "Search Context",
                 },
                 list: [
                   {
