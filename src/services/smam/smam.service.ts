@@ -24,15 +24,6 @@ export class SmamService {
     );
   }
 
-  /** Timeout for SMAM API. Defaults to 10s (SMAM team targets sub-5s response). */
-  private getApiTimeoutMs(): number {
-    const raw =
-      this.configService.get<string>("SMAM_API_TIMEOUT_MS") ||
-      process.env.SMAM_API_TIMEOUT_MS;
-    const n = raw ? parseInt(raw, 10) : NaN;
-    return Number.isFinite(n) && n > 0 ? n : 10000;
-  }
-
   private getSearchValue(body: any): string {
     const searchTag = body?.message?.intent?.item?.tags?.find(
       (tag: any) => tag?.descriptor?.code === "search_params",
@@ -93,7 +84,6 @@ export class SmamService {
     const url = `${baseUrl.replace(/\/$/, "")}/api/BeneficiaryService/GetApplicationStatusByAI`;
     this.logger.log(`[SMAM] Calling: ${url}  SearchValue=${searchValue}`);
 
-    const timeoutMs = this.getApiTimeoutMs();
 
     let apiStatus = "Failed";
     let apiMessage = "";
@@ -108,7 +98,7 @@ export class SmamService {
             Token: smamToken,
             "Content-Type": "application/json",
           },
-          timeout: timeoutMs,
+          timeout: 60000, // 60 seconds
         },
       );
 
