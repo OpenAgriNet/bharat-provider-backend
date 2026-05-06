@@ -137,12 +137,19 @@ export class AppController {
         );
         return gfrRecResponse;
       }
-      case "sathi-seed":
-        console.log("INSIDE SATHI SEED AVAILABILITY SEARCH...");
-        return this.sathiSeedService.getSeedAvailability(body);
-      case "smam":
+      case "smam": {
         console.log("INSIDE SMAM SEARCH...");
-        return this.smamService.searchSMAMBenfitData(body);
+        const smamResult = await this.smamService.searchSMAMBenfitData(body);
+        console.log("SMAM FINAL RESPONSE:", JSON.stringify(smamResult, null, 2));
+        return smamResult;
+      }
+      
+      case "sathi-seed": {
+        const sathiResult = await this.sathiSeedService.getSeedAvailability(body);
+        console.log("SATHI FINAL RESPONSE:", JSON.stringify(sathiResult, null, 2));
+        return sathiResult;
+      }
+      
 
       default:
         return this.appService.searchForIntentQuery(body);
