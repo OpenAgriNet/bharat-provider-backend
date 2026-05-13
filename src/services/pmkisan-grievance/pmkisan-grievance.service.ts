@@ -275,7 +275,8 @@ export class PmkisanGrievanceService {
     const isSuccess =
       decryptedOutput?.status !== "False" &&
       decryptedOutput?.Status !== "False" &&
-      decryptedOutput?.Responce !== "False";
+      decryptedOutput?.Responce !== "False" &&
+      String(decryptedOutput?.Responce ?? "").toLowerCase() !== "false";
 
     const responseMessage =
       decryptedOutput?.Message ??
@@ -292,60 +293,88 @@ export class PmkisanGrievanceService {
         timestamp: new Date().toISOString(),
       },
       message: {
-        order: {
-          provider: { id: "pmkisan-greviance" },
-          items: [{ id: "pmkisan-greviance" }],
-          fulfillments: [
+        catalog: {
+          descriptor: {
+            name: "PM Kisan Grievance",
+            code: "grievance-agri",
+          },
+          providers: [
             {
-              customer: {
-                person: { name: customerName },
-                contact: { phone },
-              },
-            },
-          ],
-          tags: [
-            {
+              id: "pmkisan-greviance",
               descriptor: {
-                code: "grievance-status-response",
-                name: "Grievance Status Response",
+                name: "PM Kisan Grievance",
+                code: "pmkisan-greviance",
               },
-              list: [
+              items: [
                 {
-                  descriptor: { code: "status", name: "Status" },
-                  value: isSuccess ? "Success" : "Failed",
-                },
-                {
-                  descriptor: { code: "message", name: "Message" },
-                  value: responseMessage,
-                },
-                {
-                  descriptor: { code: "lookup-type", name: "Lookup Type" },
-                  value: requestType,
-                },
-                {
-                  descriptor: { code: "identity-no", name: "Identity Number" },
-                  value: finalIdentityNo,
-                },
-                {
+                  id: "pmkisan-greviance",
                   descriptor: {
-                    code: "grievance-status",
-                    name: "Grievance Status",
+                    name: "Grievance status lookup",
+                    code: "pmkisan-greviance",
                   },
-                  value: firstDetail?.GrievanceStatus ?? "",
-                },
-                {
-                  descriptor: {
-                    code: "grievance-date",
-                    name: "Grievance Date",
-                  },
-                  value: firstDetail?.GrievanceDate ?? "",
-                },
-                {
-                  descriptor: {
-                    code: "details",
-                    name: "Details",
-                  },
-                  value: JSON.stringify(decryptedOutput?.details ?? []),
+                  tags: [
+                    {
+                      descriptor: {
+                        code: "grievance-status-response",
+                        name: "Grievance Status Response",
+                      },
+                      list: [
+                        {
+                          descriptor: { code: "status", name: "Status" },
+                          value: isSuccess ? "Success" : "Failed",
+                        },
+                        {
+                          descriptor: { code: "message", name: "Message" },
+                          value: responseMessage,
+                        },
+                        {
+                          descriptor: { code: "lookup-type", name: "Lookup Type" },
+                          value: requestType,
+                        },
+                        {
+                          descriptor: { code: "identity-no", name: "Identity Number" },
+                          value: finalIdentityNo,
+                        },
+                        {
+                          descriptor: {
+                            code: "grievance-status",
+                            name: "Grievance Status",
+                          },
+                          value: firstDetail?.GrievanceStatus ?? "",
+                        },
+                        {
+                          descriptor: {
+                            code: "grievance-date",
+                            name: "Grievance Date",
+                          },
+                          value: firstDetail?.GrievanceDate ?? "",
+                        },
+                        {
+                          descriptor: {
+                            code: "details",
+                            name: "Details",
+                          },
+                          value: JSON.stringify(decryptedOutput?.details ?? []),
+                        },
+                      ],
+                    },
+                    {
+                      descriptor: {
+                        code: "grievance-lookup-customer",
+                        name: "Lookup customer",
+                      },
+                      list: [
+                        {
+                          descriptor: { code: "name", name: "Name" },
+                          value: customerName ?? "",
+                        },
+                        {
+                          descriptor: { code: "phone", name: "Phone" },
+                          value: phone ?? "",
+                        },
+                      ],
+                    },
+                  ],
                 },
               ],
             },
@@ -450,7 +479,10 @@ export class PmkisanGrievanceService {
     const isSuccess =
       decryptedOutput?.status !== "False" &&
       decryptedOutput?.Status !== "False" &&
-      decryptedOutput?.Rsponce !== "False";
+      decryptedOutput?.Rsponce !== "False" &&
+      decryptedOutput?.Responce !== "False" &&
+      String(decryptedOutput?.Rsponce ?? decryptedOutput?.Responce ?? "").toLowerCase() !==
+        "false";
 
     const grievanceId =
       decryptedOutput?.GrievanceID ??
