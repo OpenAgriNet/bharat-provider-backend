@@ -164,6 +164,12 @@ export class MandiService {
     return "N/A";
   }
 
+  private isNoDataError(err: any): boolean {
+    const status = err?.response?.status;
+    const message = String(err?.response?.data?.message || "").toLowerCase();
+    return status === 400 && message.includes("no data");
+  }
+
   /**
    * Build Beckn on_search catalog from location API results.
    */
@@ -341,27 +347,45 @@ export class MandiService {
       fromDate = toDate;
       toDate = temp;
     }
-    const apiDate = toDate || fromDate;
+    const apiDates = Array.from(new Set([toDate, fromDate].filter((d) => !!d)));
 
     try {
       let records: any[] = [];
       try {
         const token = await this.generateDynamicToken();
-        const params: AgmarknetVistaarLocationParams = {
-          commodity_id: commoditycodeStr,
-          token,
-          date: apiDate,
-          lat: String(lat),
-          long: String(lon),
-        };
-        const apiData = await this.fetchAgmarknetVistaarLocation(params);
-        records = this.normalizeApiRecords(apiData);
+        for (const date of apiDates) {
+          const params: AgmarknetVistaarLocationParams = {
+            commodity_id: commoditycodeStr,
+            token,
+            date,
+            lat: String(lat),
+            long: String(lon),
+          };
+          try {
+            const apiData = await this.fetchAgmarknetVistaarLocation(params);
+            records = this.normalizeApiRecords(apiData);
+            if (records.length > 0) {
+              break;
+            }
+            this.logger.log(
+              `MANDI_LOCATION_API_EMPTY lat=${lat} lon=${lon} commodity=${commoditycodeStr} date=${date}`
+            );
+          } catch (err: any) {
+            if (this.isNoDataError(err)) {
+              this.logger.log(
+                `MANDI_LOCATION_API_NO_DATA lat=${lat} lon=${lon} commodity=${commoditycodeStr} date=${date}`
+              );
+              continue;
+            }
+            throw err;
+          }
+        }
       } catch (err: any) {
         this.logger.warn(`MANDI_LOCATION_API_CALL_FAILED message=${err?.message || "unknown"}`);
       }
 
       this.logger.log(
-        `MANDI_LOCATION_API_RECORDS lat=${lat} lon=${lon} commodity=${commoditycodeStr} date=${apiDate} records=${records.length}`
+        `MANDI_LOCATION_API_RECORDS lat=${lat} lon=${lon} commodity=${commoditycodeStr} dates=${apiDates.join(",")} records=${records.length}`
       );
 
       const catalog = this.buildMandiCatalog(records, lat, lon);
