@@ -1,25 +1,32 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
+import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import axios from "axios";
 
 @Injectable()
 export class PmfbyGrievanceService {
   private readonly logger = new Logger(PmfbyGrievanceService.name);
 
-  constructor(
-    private readonly configService?: ConfigService,
-  ) { }
+  constructor(private readonly configService?: ConfigService) {}
 
   private getBaseUrl(): string {
-    return this.configService?.get<string>('PMFBY_BASE_URL') || process.env.PMFBY_BASE_URL;
+    return (
+      this.configService?.get<string>("PMFBY_BASE_URL") ||
+      process.env.PMFBY_BASE_URL
+    );
   }
 
   private getAppAccessUID(): string {
-    return this.configService?.get<string>('PMFBY_APP_ACCESS_UID') || process.env.PMFBY_APP_ACCESS_UID;
+    return (
+      this.configService?.get<string>("PMFBY_APP_ACCESS_UID") ||
+      process.env.PMFBY_APP_ACCESS_UID
+    );
   }
 
   private getAppAccessPWD(): string {
-    return this.configService?.get<string>('PMFBY_APP_ACCESS_PWD') || process.env.PMFBY_APP_ACCESS_PWD;
+    return (
+      this.configService?.get<string>("PMFBY_APP_ACCESS_PWD") ||
+      process.env.PMFBY_APP_ACCESS_PWD
+    );
   }
 
   /**
@@ -30,12 +37,12 @@ export class PmfbyGrievanceService {
     const appAccessUID = this.getAppAccessUID();
     const appAccessPWD = this.getAppAccessPWD();
 
-    this.logger.log('Fetching FGMS login token...');
+    this.logger.log("Fetching FGMS login token...");
 
     const response = await axios.request({
-      method: 'post',
+      method: "post",
       url: `${baseUrl}/krphapi/FGMS/NICUsersLogin`,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { "Content-Type": "application/json" },
       data: { appAccessUID, appAccessPWD },
       timeout: 15000,
     });
@@ -43,12 +50,53 @@ export class PmfbyGrievanceService {
     const token: string | undefined = response.data?.responseDynamic?.token?.Token;
 
     if (!token) {
-      this.logger.error('FGMS login failed — no token in response', response.data);
-      throw new Error('FGMS login failed: token not found in response');
+      this.logger.error(
+        "FGMS login failed - no token in response",
+        response.data,
+      );
+      throw new Error("FGMS login failed: token not found in response");
     }
 
-    this.logger.log('FGMS token retrieved successfully');
+    this.logger.log("FGMS token retrieved successfully");
     return token;
+  }
+
+  async getGrievanceStatus(
+    requestorMobileNo: string,
+    grievanceSupportTicketNo: string,
+  ): Promise<any> {
+    try {
+      const token = await this.getFGMSToken();
+
+      const response = await axios.request({
+        method: "post",
+        url: `${this.getBaseUrl()}/krphapi/FGMS/GetGrievenceTicketsStatus`,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token,
+        },
+        data: {
+          requestorMobileNo,
+          GrievenceSupportTicketNo: grievanceSupportTicketNo,
+        },
+        timeout: 15000,
+      });
+
+      this.logger.log(
+        "FGMS grievance status response: " + JSON.stringify(response.data),
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `PMFBY grievance status API error: ${error.message}`,
+        error.response?.data ?? "",
+      );
+      throw new Error(
+        error.response?.data?.responseMessage ||
+          error.message ||
+          "Failed to fetch grievance status",
+      );
+    }
   }
 
   /**
@@ -68,23 +116,26 @@ export class PmfbyGrievanceService {
 
     // ── Helper: read a flat tag value by code from person.tags ───────────
     const getTagValue = (code: string): string =>
-      person?.tags?.find(
-        (tag: any) => tag?.descriptor?.code === code,
-      )?.value ?? '';
+      person?.tags?.find((tag: any) => tag?.descriptor?.code === code)
+        ?.value ?? "";
 
     // ── Extract all fields from flat person tags ─────────────────────────
-    const requestorMobileNo: string = getTagValue('phone_number');
-    const customerName: string = person?.name ?? '';
-    const complaintDate: string = getTagValue('complaint_date');
-    const receiptSourceID: number = Number(getTagValue('receipt_source_id')) || 0;
-    const ticketCategoryID: number = Number(getTagValue('ticket_category_id')) || 0;
-    const ticketSubCategoryID: number = Number(getTagValue('ticket_sub_category_id')) || 0;
-    const requestYear: string = getTagValue('request_year');
-    const requestSeason: number = Number(getTagValue('request_season')) || 0;
-    const applicationNo: string = getTagValue('application_no');
-    const grievenceDescription: string = getTagValue('grievance_description');
+    const requestorMobileNo: string = getTagValue("phone_number");
+    const customerName: string = person?.name ?? "";
+    const complaintDate: string = getTagValue("complaint_date");
+    const receiptSourceID: number = Number(getTagValue("receipt_source_id")) || 0;
+    const ticketCategoryID: number =
+      Number(getTagValue("ticket_category_id")) || 0;
+    const ticketSubCategoryID: number =
+      Number(getTagValue("ticket_sub_category_id")) || 0;
+    const requestYear: string = getTagValue("request_year");
+    const requestSeason: number = Number(getTagValue("request_season")) || 0;
+    const applicationNo: string = getTagValue("application_no");
+    const grievenceDescription: string = getTagValue("grievance_description");
 
-    this.logger.log(`[PMFBY GRIEVANCE] Submitting for mobile: ${requestorMobileNo}, applicationNo: ${applicationNo}`);
+    this.logger.log(
+      `[PMFBY GRIEVANCE] Submitting for mobile: ${requestorMobileNo}, applicationNo: ${applicationNo}`,
+    );
 
     let apiResponse: any = {};
     try {
@@ -93,11 +144,11 @@ export class PmfbyGrievanceService {
 
       // Step 2: Submit grievance ticket
       const response = await axios.request({
-        method: 'post',
+        method: "post",
         url: `${this.getBaseUrl()}/krphapi/FGMS/AddKRPHNCIPGrievenceSupportTicket`,
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': token,
+          "Content-Type": "application/json",
+          Authorization: token,
         },
         data: {
           requestorMobileNo,
@@ -113,29 +164,35 @@ export class PmfbyGrievanceService {
         timeout: 15000,
       });
 
-      this.logger.log('FGMS grievance response: ' + JSON.stringify(response.data));
+      this.logger.log("FGMS grievance response: " + JSON.stringify(response.data));
       apiResponse = response.data;
     } catch (error) {
-      this.logger.error(`PMFBY Grievance API error: ${error.message}`, error.response?.data ?? '');
-      apiResponse = { responseCode: '0', responseMessage: error.message };
+      this.logger.error(
+        `PMFBY Grievance API error: ${error.message}`,
+        error.response?.data ?? "",
+      );
+      apiResponse = { responseCode: "0", responseMessage: error.message };
     }
 
     // ── Map FGMS response to Beckn on_init envelope ──────────────────────
-    const isSuccess = apiResponse?.responseCode === '1';
-    const ticketNo: string = apiResponse?.responseDynamic?.GrievenceSupportTicketNo ?? '';
-    const ticketId: string = String(apiResponse?.responseDynamic?.GrievenceSupportTicketID ?? '');
-    const responseMessage: string = apiResponse?.responseMessage ?? '';
+    const isSuccess = apiResponse?.responseCode === "1";
+    const ticketNo: string =
+      apiResponse?.responseDynamic?.GrievenceSupportTicketNo ?? "";
+    const ticketId: string = String(
+      apiResponse?.responseDynamic?.GrievenceSupportTicketID ?? "",
+    );
+    const responseMessage: string = apiResponse?.responseMessage ?? "";
 
     return {
       context: {
         ...context,
-        action: 'on_init',
+        action: "on_init",
         timestamp: new Date().toISOString(),
       },
       message: {
         order: {
-          provider: { id: 'pmfby-grievance' },
-          items: [{ id: 'pmfby-grievance' }],
+          provider: { id: "pmfby-grievance" },
+          items: [{ id: "pmfby-grievance" }],
           fulfillments: [
             {
               customer: {
@@ -152,23 +209,26 @@ export class PmfbyGrievanceService {
               },
               list: [
                 {
-                  descriptor: { code: 'status', name: 'Status' },
-                  value: isSuccess ? 'Submitted' : 'Failed',
+                  descriptor: { code: "status", name: "Status" },
+                  value: isSuccess ? "Submitted" : "Failed",
                 },
                 {
-                  descriptor: { code: 'ticket-no', name: 'Ticket Number' },
+                  descriptor: { code: "ticket-no", name: "Ticket Number" },
                   value: ticketNo,
                 },
                 {
-                  descriptor: { code: 'ticket-id', name: 'Ticket ID' },
+                  descriptor: { code: "ticket-id", name: "Ticket ID" },
                   value: ticketId,
                 },
                 {
-                  descriptor: { code: 'application-no', name: 'Application Number' },
+                  descriptor: {
+                    code: "application-no",
+                    name: "Application Number",
+                  },
                   value: applicationNo,
                 },
                 {
-                  descriptor: { code: 'message', name: 'Message' },
+                  descriptor: { code: "message", name: "Message" },
                   value: responseMessage,
                 },
               ],

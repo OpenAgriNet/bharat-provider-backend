@@ -34,6 +34,7 @@ import * as fs from "fs";
 import { HasuraService } from "./services/hasura/hasura.service";
 import { AuthService } from "./auth/auth.service";
 import { PmfbyService } from "./services/pmfby/pmfby.service";
+import { PmfbyGrievanceService } from "./services/pmfby/pmfby-greviance.service";
 import { WeatherForecastService } from "./services/weatherforecast/weatherforecast.service";
 import { MandiService } from "./services/mandi/mandi.service";
 const file = fs.readFileSync("./course.json", "utf8");
@@ -64,6 +65,7 @@ export class AppService {
     private readonly logger: LoggerService,
     private readonly configService: ConfigService,
     private readonly pmfbyService: PmfbyService,
+    private readonly pmfbyGrievanceService: PmfbyGrievanceService,
     private readonly weatherForecastService: WeatherForecastService,
     private readonly mandiService: MandiService,
   ) {}
@@ -2720,6 +2722,34 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       body?.message?.intent?.category?.descriptor?.code ||
       "pmfby";
 
+    const grievanceFulfillment =
+      body?.fulfillments?.[0] ??
+      body?.message?.fulfillments?.[0] ??
+      body?.message?.order?.fulfillments?.[0];
+    const grievanceTags =
+      grievanceFulfillment?.customer?.person?.tags ??
+      grievanceFulfillment?.person?.tags ??
+      (Array.isArray(grievanceFulfillment?.tags)
+        ? grievanceFulfillment.tags
+        : []);
+    const getGrievanceTagValue = (code: string) =>
+      grievanceTags.find((tag: any) => tag?.descriptor?.code === code)?.value;
+    const requestType = getGrievanceTagValue("request_type");
+
+    if (
+      String(providerId).toLowerCase() === "pmfby-grievance" ||
+      String(itemId).toLowerCase() === "pmfby-grievance" ||
+      String(requestType).toLowerCase() === "status_grievance"
+    ) {
+      return await this.handlePmfbyGrievanceSearch(
+        body,
+        providerId,
+        itemId,
+        grievanceFulfillment,
+        getGrievanceTagValue,
+      );
+    }
+
     const buildSearchError = (
       code: string,
       name: string,
@@ -2929,6 +2959,140 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       context: baseSearchContext(),
       message: { catalog: mappedResponse },
     };
+  }
+
+  private async handlePmfbyGrievanceSearch(
+    body: any,
+    providerId: string,
+    itemId: string,
+    fulfillment: any,
+    getTagValue: (code: string) => any,
+  ) {
+    const requestType = getTagValue("request_type");
+    const mobileNumber = getTagValue("requestorMobileNo");
+    const grievanceSupportTicketNo = getTagValue("GrievenceSupportTicketNo");
+
+    if (String(requestType).toLowerCase() !== "status_grievance") {
+      return this.createStatusErrorResponse(
+        body.context,
+        "invalid_request_type",
+        "request_type must be status_grievance for PMFBY grievance lookup",
+      );
+    }
+
+    if (!mobileNumber || !grievanceSupportTicketNo) {
+      return this.createStatusErrorResponse(
+        body.context,
+        "missing_input",
+        "requestorMobileNo and GrievenceSupportTicketNo are required in fulfillment customer.person.tags.",
+      );
+    }
+
+    try {
+      const response = await this.pmfbyGrievanceService.getGrievanceStatus(
+        String(mobileNumber).trim(),
+        String(grievanceSupportTicketNo).trim(),
+      );
+
+      const isSuccess = String(response?.responseCode ?? "") === "1";
+      const responseMessage =
+        response?.responseMessage ??
+        (isSuccess
+          ? "Grievance status fetched successfully"
+          : "Failed to fetch grievance status");
+
+      return {
+        context: {
+          ...body.context,
+          action: "on_status",
+          timestamp: new Date().toISOString(),
+          ttl: "PT10M",
+        },
+        message: {
+          order: {
+            id:
+              body?.message?.order?.id ??
+              String(grievanceSupportTicketNo).trim(),
+            state: isSuccess ? "COMPLETED" : "FAILED",
+            provider: {
+              id: providerId || "pmfby-grievance",
+            },
+            items: [
+              {
+                id: itemId || "pmfby-grievance",
+              },
+            ],
+            fulfillments: fulfillment ? [fulfillment] : [],
+            tags: [
+              {
+                display: true,
+                descriptor: {
+                  name: "Grievance Status",
+                  code: isSuccess
+                    ? "grievance_status_fetched"
+                    : "grievance_status_failed",
+                  short_desc: responseMessage,
+                },
+                list: [
+                  {
+                    descriptor: { code: "request_type", name: "Request Type" },
+                    value: String(requestType),
+                  },
+                  {
+                    descriptor: {
+                      code: "requestorMobileNo",
+                      name: "Requestor Mobile Number",
+                    },
+                    value: String(mobileNumber),
+                  },
+                  {
+                    descriptor: {
+                      code: "GrievenceSupportTicketNo",
+                      name: "Grievance Support Ticket Number",
+                    },
+                    value: String(grievanceSupportTicketNo),
+                  },
+                  {
+                    descriptor: {
+                      code: "responseCode",
+                      name: "Response Code",
+                    },
+                    value: String(response?.responseCode ?? ""),
+                  },
+                  {
+                    descriptor: {
+                      code: "responseMessage",
+                      name: "Response Message",
+                    },
+                    value: String(responseMessage),
+                  },
+                  {
+                    descriptor: {
+                      code: "recordCount",
+                      name: "Record Count",
+                    },
+                    value: String(response?.recordCount ?? ""),
+                  },
+                  {
+                    descriptor: {
+                      code: "responseDynamic",
+                      name: "Response Dynamic",
+                    },
+                    value: JSON.stringify(response?.responseDynamic ?? {}),
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      };
+    } catch (err: any) {
+      return this.createStatusErrorResponse(
+        body.context,
+        "pmfby_error",
+        err?.message ?? "PMFBY grievance request failed",
+      );
+    }
   }
 
   async mandiSearch(body: any) {
