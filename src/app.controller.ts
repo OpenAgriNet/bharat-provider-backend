@@ -190,7 +190,9 @@ export class AppController {
       case (
         categoryCode === "pmfby" ||
         categoryNameLower === "pmfby" ||
-        !!categoryCode?.startsWith("pmfby")
+        !!categoryCode?.startsWith("pmfby") ||
+        providerId === "pmfby-grievance" ||
+        firstItemId === "pmfby-grievance"
       ):
         return "pmfby";
       case categoryCode === "grievance" || categoryNameLower === "grievance-agri":
