@@ -1014,22 +1014,6 @@ export class AppService {
 
     try {
       if (this.isPmfbyGrievanceStatusRequest(body)) {
-        const fulfillment =
-          body?.message?.order?.fulfillments?.[0] ??
-          body?.message?.fulfillments?.[0] ??
-          body?.fulfillments?.[0];
-        const tags =
-          fulfillment?.customer?.person?.tags ??
-          fulfillment?.person?.tags ??
-          (Array.isArray(fulfillment?.tags) ? fulfillment.tags : []);
-        const grievanceSupportTicketNo = tags.find(
-          (tag: any) => tag?.descriptor?.code === "GrievenceSupportTicketNo",
-        )?.value;
-
-        if (grievanceSupportTicketNo && !body.message?.order_id) {
-          body.message = body.message || {};
-          body.message.order_id = String(grievanceSupportTicketNo).trim();
-        }
         return await this.handlePmfbyGrievanceStatus(body);
       }
 
