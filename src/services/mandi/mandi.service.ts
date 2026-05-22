@@ -1,94 +1,79 @@
 import { Injectable, Logger } from "@nestjs/common";
 import axios from "axios";
 import { format } from "date-fns";
+import { DatabaseService, MandiMasterRow } from "../weatherforecast/database.service";
 
-export interface AgmarknetVistaarLocationParams {
-  commodity_id: string;
-  token: string;
-  date: string;
-  lat: string;
-  long: string;
+export interface AgmarknetVistaarParams {
+  statecode: string;
+  from_date: string;
+  to_date: string;
+  commoditycode: string;
+  districtcode: string;
+  marketcode: string;
 }
 
 @Injectable()
 export class MandiService {
   private readonly logger = new Logger(MandiService.name);
   private readonly baseUrl = process.env.MANDI_BASE_URL;
-  private readonly accessName = process.env.MANDI_ACCESS_NAME;
-  private readonly password = process.env.MANDI_PASSWORD;
   private readonly token = process.env.MANDI_TOKEN;
 
+  constructor(private readonly databaseService: DatabaseService) {}
+
   /**
-   * Generate token from AGMARKNET QA API.
+   * Get mandi master data from IMD DB by lat/lon (geometry match).
    */
-  private async generateDynamicToken(): Promise<string> {
-    if (!this.accessName || !this.password) {
-      if (this.token) {
-        this.logger.warn(
-          "MANDI_TOKEN_GENERATION_SKIPPED reason=missing_access_credentials fallback=MANDI_TOKEN"
-        );
-        return this.token;
-      }
-      throw new Error("Missing MANDI_ACCESS_NAME or MANDI_PASSWORD");
-    }
-
-    const url = `${this.baseUrl}/v1/generate-dynamic-token-agmarknet`;
-    const payload = {
-      access_name: this.accessName,
-      password: this.password,
-    };
-
-    try {
-      this.logger.log(`MANDI_TOKEN_REQUEST method=POST url=${url}`);
-      const response = await axios.post(url, payload, {
-        timeout: 15000,
-        headers: { "Content-Type": "application/json" },
-      });
-      const generatedToken = String(response?.data?.token || "").trim();
-      if (!generatedToken) {
-        throw new Error("Token missing in generate-dynamic-token-agmarknet response");
-      }
-      this.logger.log(
-        `MANDI_TOKEN_RESPONSE status=${response.status} token_length=${generatedToken.length}`
-      );
-      return generatedToken;
-    } catch (err: any) {
-      const status = err?.response?.status;
-      const body = err?.response?.data;
-      const msg = typeof body === "object" ? JSON.stringify(body) : body ?? err.message;
-      this.logger.warn(`MANDI_TOKEN_ERROR status=${status ?? "unknown"} message=${msg}`);
-      if (this.token) {
-        this.logger.warn("MANDI_TOKEN_FALLBACK source=MANDI_TOKEN");
-        return this.token;
-      }
-      throw err;
-    }
+  async getMandiMasterData(lat: number, lon: number): Promise<MandiMasterRow[]> {
+    return this.databaseService.findMandiMasterData(lat, lon);
   }
 
   /**
-   * Call AGMARKNET location API: GET /v1/fetch-agmarknet-vistaar-location
+   * Call Agmarknet Vistaar API: GET /v1/fetch-agmarknet-vistaar
    */
-  async fetchAgmarknetVistaarLocation(params: AgmarknetVistaarLocationParams): Promise<any> {
-    const url = `${this.baseUrl}/v1/fetch-agmarknet-vistaar-location`;
-    const queryParams = new URLSearchParams({
-      commodity_id: params.commodity_id,
-      token: params.token,
-      date: params.date,
-      lat: params.lat,
-      long: params.long,
-    });
-    const requestKey = this.getApiRequestKey(params);
-    const query = queryParams.toString();
-    this.logger.log(`MANDI_API_REQUEST key=${requestKey} method=GET url=${url}?${query}`);
+  async fetchAgmarknetVistaar(params: AgmarknetVistaarParams): Promise<any> {
+    const url = `${this.baseUrl}/v1/fetch-agmarknet-vistaar`;
+    const buildQuery = (includeMarketcode: boolean): string => {
+      const queryParams = new URLSearchParams({
+        token: this.token || "",
+        statecode: params.statecode,
+        from_date: params.from_date,
+        to_date: params.to_date,
+        commoditycode: params.commoditycode,
+        districtcode: params.districtcode,
+      });
+      if (includeMarketcode && params.marketcode) {
+        queryParams.set("marketcode", params.marketcode);
+      }
+      return queryParams.toString();
+    };
 
+    const requestKey = this.getApiRequestKey(params);
+    const query = buildQuery(true);
+    this.logger.log(`MANDI_API_REQUEST key=${requestKey} method=GET url=${url}?${query}`);
     try {
       const response = await axios.get(`${url}?${query}`, { timeout: 15000 });
-      const data = response.data;
-      const records = this.normalizeApiRecords(data);
+      let data = response.data;
+      let records = this.normalizeApiRecords(data);
       const sample = records[0] ? JSON.stringify(records[0]).slice(0, 500) : "";
       this.logger.log(
         `MANDI_API_RESPONSE key=${requestKey} status=${response.status} records=${records.length} sample=${sample || "none"}`
       );
+
+      // If marketcode-level query returns empty, retry without marketcode to avoid false negatives.
+      if (records.length === 0 && params.marketcode) {
+        const fallbackQuery = buildQuery(false);
+        this.logger.log(
+          `MANDI_API_FALLBACK key=${requestKey} reason=empty_records retry_without=marketcode url=${url}?${fallbackQuery}`
+        );
+        const fallbackResponse = await axios.get(`${url}?${fallbackQuery}`, { timeout: 15000 });
+        data = fallbackResponse.data;
+        records = this.normalizeApiRecords(data);
+        const fallbackSample = records[0] ? JSON.stringify(records[0]).slice(0, 500) : "";
+        this.logger.log(
+          `MANDI_API_FALLBACK_RESPONSE key=${requestKey} status=${fallbackResponse.status} records=${records.length} sample=${fallbackSample || "none"}`
+        );
+      }
+
       return data;
     } catch (err: any) {
       const status = err?.response?.status;
@@ -99,12 +84,14 @@ export class MandiService {
     }
   }
 
-  private getApiRequestKey(params: AgmarknetVistaarLocationParams): string {
+  private getApiRequestKey(params: AgmarknetVistaarParams): string {
     return [
-      `lat=${params.lat || "NA"}`,
-      `lon=${params.long || "NA"}`,
-      `commodity=${params.commodity_id || "NA"}`,
-      `date=${params.date || "NA"}`,
+      `state=${params.statecode || "NA"}`,
+      `district=${params.districtcode || "NA"}`,
+      `market=${params.marketcode || "NA"}`,
+      `commodity=${params.commoditycode || "NA"}`,
+      `from=${params.from_date || "NA"}`,
+      `to=${params.to_date || "NA"}`,
     ].join("|");
   }
 
@@ -154,79 +141,53 @@ export class MandiService {
     return [];
   }
 
-  private pickFirst(rec: any, keys: string[]): string {
-    for (const key of keys) {
-      const value = rec?.[key];
-      if (value !== undefined && value !== null && String(value).trim() !== "") {
-        return String(value);
-      }
-    }
-    return "N/A";
-  }
-
   /**
-   * Build Beckn on_search catalog from location API results.
+   * Build Beckn on_search catalog from mandi + API results.
    */
   private buildMandiCatalog(
-    records: any[],
+    results: Array<{ mandi: MandiMasterRow; api: any }>,
     lat: number,
     lon: number,
   ): { descriptor: { name: string }; providers: any[] } {
     const items: any[] = [];
     let itemId = 0;
 
-    for (const rec of records) {
-      itemId += 1;
-      const state = this.pickFirst(rec, ["State", "state", "state_name"]);
-      const district = this.pickFirst(rec, ["District", "district", "district_name"]);
-      const market = this.pickFirst(rec, ["Market", "market", "market_name"]);
-      const commodity = this.pickFirst(rec, ["Commodity", "commodity", "commodity_name"]);
-      const grade = this.pickFirst(rec, ["Grade", "grade"]);
-      const group = this.pickFirst(rec, ["Group", "group"]);
-      const variety = this.pickFirst(rec, ["Variety", "variety"]);
+    for (const { mandi, api } of results) {
+      const records = this.normalizeApiRecords(api);
+      for (const rec of records) {
+        itemId += 1;
+        const state = rec?.State ?? mandi.state ?? "N/A";
+        const district = rec?.District ?? mandi.district_name ?? "N/A";
+        const market = rec?.Market ?? mandi.marketcode ?? "N/A";
+        const commodity = rec?.Commodity ?? "N/A";
+        const tags: any[] = [
+          { descriptor: { code: "State" }, value: state },
+          { descriptor: { code: "District" }, value: district },
+          { descriptor: { code: "Market" }, value: market },
+          { descriptor: { code: "Commodity" }, value: commodity },
+          { descriptor: { code: "Modal Price" }, value: rec?.["Modal Price"] ?? "N/A" },
+          { descriptor: { code: "Min Price" }, value: rec?.["Min Price"] ?? "N/A" },
+          { descriptor: { code: "Max Price" }, value: rec?.["Max Price"] ?? "N/A" },
+          { descriptor: { code: "Price Unit" }, value: rec?.["Price Unit"] ?? "N/A" },
+          { descriptor: { code: "Arrival Date" }, value: rec?.["Arrival Date"] ?? "N/A" },
+        ];
+        if (rec?.Grade) tags.push({ descriptor: { code: "Grade" }, value: rec.Grade });
+        if (rec?.Group) tags.push({ descriptor: { code: "Group" }, value: rec.Group });
+        if (rec?.Variety) tags.push({ descriptor: { code: "Variety" }, value: rec.Variety });
 
-      const tags: any[] = [
-        { descriptor: { code: "State" }, value: state },
-        { descriptor: { code: "District" }, value: district },
-        { descriptor: { code: "Market" }, value: market },
-        { descriptor: { code: "Commodity" }, value: commodity },
-        {
-          descriptor: { code: "Modal Price" },
-          value: this.pickFirst(rec, ["Modal Price", "modal_price", "modalPrice"]),
-        },
-        {
-          descriptor: { code: "Min Price" },
-          value: this.pickFirst(rec, ["Min Price", "min_price", "minPrice"]),
-        },
-        {
-          descriptor: { code: "Max Price" },
-          value: this.pickFirst(rec, ["Max Price", "max_price", "maxPrice"]),
-        },
-        {
-          descriptor: { code: "Price Unit" },
-          value: this.pickFirst(rec, ["Price Unit", "price_unit", "priceUnit"]),
-        },
-        {
-          descriptor: { code: "Arrival Date" },
-          value: this.pickFirst(rec, ["Arrival Date", "arrival_date", "arrivalDate", "date"]),
-        },
-      ];
-      if (grade !== "N/A") tags.push({ descriptor: { code: "Grade" }, value: grade });
-      if (group !== "N/A") tags.push({ descriptor: { code: "Group" }, value: group });
-      if (variety !== "N/A") tags.push({ descriptor: { code: "Variety" }, value: variety });
-
-      items.push({
-        id: `mandi-${itemId}`,
-        descriptor: {
-          name: `${commodity} - ${market}`,
-          short_desc: `${commodity} at ${market}, ${district}, ${state}`,
-          images: [],
-        },
-        matched: true,
-        category_ids: ["mandi-price"],
-        fulfillment_ids: ["mandi-f1"],
-        tags: [{ descriptor: { code: "price-info" }, list: tags }],
-      });
+        items.push({
+          id: `mandi-${itemId}`,
+          descriptor: {
+            name: `${commodity} - ${market}`,
+            short_desc: `${commodity} at ${market}, ${district}, ${state}`,
+            images: [],
+          },
+          matched: true,
+          category_ids: ["mandi-price"],
+          fulfillment_ids: ["mandi-f1"],
+          tags: [{ descriptor: { code: "price-info" }, list: tags }],
+        });
+      }
     }
 
     if (items.length === 0) {
@@ -263,7 +224,7 @@ export class MandiService {
 
   /**
    * Mandi search: requires fulfillment.stops[0] with location (lat, lon), time.range (start, end), and commoditycode.
-   * Calls AGMARKNET token + location APIs and returns on_search catalog.
+   * Resolves mandi from IMD DB by location, calls Agmarknet Vistaar API with required params, returns on_search catalog.
    */
   async mandiSearch(body: {
     context: any;
@@ -341,30 +302,45 @@ export class MandiService {
       fromDate = toDate;
       toDate = temp;
     }
-    const apiDate = toDate || fromDate;
 
     try {
-      let records: any[] = [];
-      try {
-        const token = await this.generateDynamicToken();
-        const params: AgmarknetVistaarLocationParams = {
-          commodity_id: commoditycodeStr,
-          token,
-          date: apiDate,
-          lat: String(lat),
-          long: String(lon),
+      const rows = await this.getMandiMasterData(lat, lon);
+      this.logger.log(
+        `MANDI_DB_ROWS lat=${lat} lon=${lon} commodity=${commoditycodeStr} rows=${rows.length}`
+      );
+
+      const results: Array<{ mandi: MandiMasterRow; api: any }> = [];
+      const uniqueParamsByKey = new Map<string, { params: AgmarknetVistaarParams; mandi: MandiMasterRow }>();
+
+      for (const row of rows) {
+        const params: AgmarknetVistaarParams = {
+          statecode: row.statecode,
+          from_date: fromDate,
+          to_date: toDate,
+          commoditycode: commoditycodeStr,
+          districtcode: row.districtcode ?? "",
+          marketcode: row.marketcode,
         };
-        const apiData = await this.fetchAgmarknetVistaarLocation(params);
-        records = this.normalizeApiRecords(apiData);
-      } catch (err: any) {
-        this.logger.warn(`MANDI_LOCATION_API_CALL_FAILED message=${err?.message || "unknown"}`);
+        const key = this.getApiRequestKey(params);
+        if (!uniqueParamsByKey.has(key)) {
+          uniqueParamsByKey.set(key, { params, mandi: row });
+        }
       }
 
       this.logger.log(
-        `MANDI_LOCATION_API_RECORDS lat=${lat} lon=${lon} commodity=${commoditycodeStr} date=${apiDate} records=${records.length}`
+        `MANDI_API_DEDUP total_rows=${rows.length} unique_requests=${uniqueParamsByKey.size}`
       );
 
-      const catalog = this.buildMandiCatalog(records, lat, lon);
+      for (const [key, entry] of uniqueParamsByKey.entries()) {
+        try {
+          const apiData = await this.fetchAgmarknetVistaar(entry.params);
+          results.push({ mandi: entry.mandi, api: apiData });
+        } catch (err) {
+          this.logger.warn(`MANDI_API_CALL_FAILED key=${key} message=${(err as Error).message}`);
+        }
+      }
+
+      const catalog = this.buildMandiCatalog(results, lat, lon);
       return {
         context: onSearchContext,
         message: { catalog },
