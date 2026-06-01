@@ -2224,6 +2224,7 @@ export class AppService {
         searchQuery = ""; // or handle case where no filters are applied
       }
 
+      console.log("Scheme search query generated=======>>>> ", JSON.stringify(searchQuery, null, 2));
       const resp = await this.hasuraService.findIcarContent(searchQuery);
 
       // const icarResponse: any = resp.data.icar_.Content;
