@@ -1158,37 +1158,37 @@ export const PmKisanIcarGenerator = (apiData: any, query: string) => {
                   },
                   {
                     descriptor: { code: 'scheme-intro', name: 'Scheme Introduction' },
-                    value: item.scheme_intro?.summary || '',
+                    value: item.scheme_intro?.summary || item.scheme_exclusion?.value || '',
                     display: true,
                   },
                   {
                     descriptor: { code: 'scheme-benefits', name: 'Scheme Benefits' },
-                    value: item.scheme_benefits?.summary || '',
+                    value: item.scheme_benefits?.summary || item.scheme_exclusion?.value || '',
                     display: true,
                   },
                   {
                     descriptor: { code: 'scheme-eligibility', name: 'Scheme Eligibility' },
-                    value: item.scheme_eligibility?.summary || '',
+                    value: item.scheme_eligibility?.summary || item.scheme_exclusion?.value || '',
                     display: true,
                   },
                   {
                     descriptor: { code: 'scheme-support', name: 'Scheme Support' },
-                    value: item.scheme_support?.summary || '',
+                    value: item.scheme_support?.summary || item.scheme_exclusion?.value || '',
                     display: true,
                   },
                   {
                     descriptor: { code: 'scheme-misc', name: 'Additional Information' },
-                    value: item.scheme_misc?.summary || '',
+                    value: item.scheme_misc?.summary || item.scheme_exclusion?.value || '',
                     display: true,
                   },
                   {
                     descriptor: { code: 'scheme-application', name: 'Scheme Application' },
-                    value: item.scheme_application?.summary || '',
+                    value: item.scheme_application?.summary || item.scheme_exclusion?.value || '',
                     display: true,
                   },
                   {
                     descriptor: { code: 'scheme-exclusion', name: 'Scheme Exclusion' },
-                    value: item.scheme_exclusion?.summary || '',
+                    value: item.scheme_exclusion?.summary || item.scheme_exclusion?.value || '',
                     display: true,
                   },
                   {
