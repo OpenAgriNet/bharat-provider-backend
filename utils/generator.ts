@@ -1187,6 +1187,11 @@ export const PmKisanIcarGenerator = (apiData: any, query: string) => {
                     display: true,
                   },
                   {
+                    descriptor: { code: 'scheme-exclusion', name: 'Scheme Exclusion' },
+                    value: item.scheme_exclusion?.summary || '',
+                    display: true,
+                  },
+                  {
                     descriptor: { code: 'faq-url', name: 'FAQ URL' },
                     value: item.faq_url || '',
                     display: true,
