@@ -67,7 +67,9 @@ export class PmfbyGrievanceService {
   ): Promise<any> {
     try {
       const token = await this.getFGMSToken();
-
+      console.log("token", token);
+      console.log("requestorMobileNo", requestorMobileNo);
+      console.log("grievanceSupportTicketNo", grievanceSupportTicketNo);
       const response = await axios.request({
         method: "post",
         url: `${this.getBaseUrl()}/krphapi/FGMS/GetGrievenceTicketsStatus`,
