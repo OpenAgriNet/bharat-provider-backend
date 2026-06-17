@@ -9,6 +9,7 @@ export class HasuraService {
   private adminSecretKey = process.env.HASURA_GRAPHQL_ADMIN_SECRET;
   private nameSpace = process.env.HASURA_NAMESPACE;
   private contentSchemaFieldsCache: Set<string> | null = null;
+  private contentQueryModeCache: 'direct' | 'namespaced' | null = null;
   private contentSchemaCacheExpiry = 0;
   private readonly contentSchemaCacheTtlMs = 5 * 60 * 1000;
 
@@ -1861,17 +1862,53 @@ export class HasuraService {
   private isSchemaCacheValid(): boolean {
     return (
       this.contentSchemaFieldsCache !== null &&
+      this.contentQueryModeCache !== null &&
       Date.now() < this.contentSchemaCacheExpiry
     );
   }
 
-  private async introspectContentSchemaFields(): Promise<Set<string>> {
-    if (this.isSchemaCacheValid() && this.contentSchemaFieldsCache) {
-      return this.contentSchemaFieldsCache;
+  private resolveQueryModeFromRootFields(
+    rootFields: string[],
+  ): 'direct' | 'namespaced' {
+    if (rootFields.includes('Content')) {
+      return 'direct';
     }
 
-    const introspectionQuery = `query IntrospectContentFields {
-      __type(name: "Content") {
+    if (this.nameSpace && rootFields.includes(this.nameSpace)) {
+      return 'namespaced';
+    }
+
+    if (this.nameSpace) {
+      console.log(
+        `HASURA_NAMESPACE="${this.nameSpace}" not found on query_root; using direct Content query`,
+      );
+    }
+
+    return 'direct';
+  }
+
+  private async introspectHasuraContentSchema(): Promise<{
+    fields: Set<string>;
+    queryMode: 'direct' | 'namespaced';
+  }> {
+    if (
+      this.isSchemaCacheValid() &&
+      this.contentSchemaFieldsCache &&
+      this.contentQueryModeCache
+    ) {
+      return {
+        fields: this.contentSchemaFieldsCache,
+        queryMode: this.contentQueryModeCache,
+      };
+    }
+
+    const introspectionQuery = `query IntrospectHasuraContentSchema {
+      contentType: __type(name: "Content") {
+        fields {
+          name
+        }
+      }
+      queryRoot: __type(name: "query_root") {
         fields {
           name
         }
@@ -1879,9 +1916,13 @@ export class HasuraService {
     }`;
 
     const response = await this.queryDb(introspectionQuery);
-    const fields = response?.data?.__type?.fields;
+    const contentFields = response?.data?.contentType?.fields;
+    const rootFields: string[] =
+      response?.data?.queryRoot?.fields?.map(
+        (field: { name: string }) => field.name,
+      ) ?? [];
 
-    if (!Array.isArray(fields)) {
+    if (!Array.isArray(contentFields)) {
       this.logger.error(
         'Content schema introspection failed; using configured field list as fallback',
         JSON.stringify(response?.errors ?? response),
@@ -1889,32 +1930,30 @@ export class HasuraService {
       this.contentSchemaFieldsCache = new Set(
         Object.keys(this.icarContentFieldSelections),
       );
-      this.contentSchemaCacheExpiry =
-        Date.now() + this.contentSchemaCacheTtlMs;
-      return this.contentSchemaFieldsCache;
+    } else {
+      this.contentSchemaFieldsCache = new Set(
+        contentFields.map((field: { name: string }) => field.name),
+      );
     }
 
-    this.contentSchemaFieldsCache = new Set(
-      fields.map((field: { name: string }) => field.name),
-    );
+    this.contentQueryModeCache = this.resolveQueryModeFromRootFields(rootFields);
     this.contentSchemaCacheExpiry = Date.now() + this.contentSchemaCacheTtlMs;
-    return this.contentSchemaFieldsCache;
+
+    return {
+      fields: this.contentSchemaFieldsCache,
+      queryMode: this.contentQueryModeCache,
+    };
   }
 
   /**
-   * Dev Hasura is namespaced via HASURA_NAMESPACE (e.g. icar_).
-   * Prod exposes Content at the query root without that wrapper.
+   * Prod (direct): dynamic where/limit from search filters.
+   * Dev (namespaced): fixed limit only, no filter args.
    */
-  private usesNamespacedContentQuery(): boolean {
-    return Boolean(this.nameSpace?.trim());
-  }
-
-  /**
-   * Prod supports dynamic where/limit args from search filters.
-   * Dev keeps the original fixed limit query without filter args.
-   */
-  private buildContentArgs(searchQuery?: string): string {
-    if (this.usesNamespacedContentQuery()) {
+  private buildContentArgs(
+    searchQuery: string | undefined,
+    queryMode: 'direct' | 'namespaced',
+  ): string {
+    if (queryMode === 'namespaced') {
       return '(limit: 10)';
     }
 
@@ -1926,10 +1965,15 @@ export class HasuraService {
   }
 
   extractIcarContentResponse(response: any): any[] | undefined {
-    if (this.usesNamespacedContentQuery()) {
-      return response?.data?.[this.nameSpace]?.Content;
+    if (response?.data?.Content) {
+      return response.data.Content;
     }
-    return response?.data?.Content;
+
+    if (this.nameSpace && response?.data?.[this.nameSpace]?.Content) {
+      return response.data[this.nameSpace].Content;
+    }
+
+    return undefined;
   }
 
   private buildIcarContentFieldSelection(availableFields: Set<string>): string {
@@ -1979,13 +2023,9 @@ export class HasuraService {
   }
 
   async findIcarContent(searchQuery?: string) {
-    const usesNamespace = this.usesNamespacedContentQuery();
-    const contentArgs = this.buildContentArgs(searchQuery);
-    const queryMode: 'direct' | 'namespaced' = usesNamespace
-      ? 'namespaced'
-      : 'direct';
-
-    const availableFields = await this.introspectContentSchemaFields();
+    const { fields: availableFields, queryMode } =
+      await this.introspectHasuraContentSchema();
+    const contentArgs = this.buildContentArgs(searchQuery, queryMode);
     const fieldSelection = this.buildIcarContentFieldSelection(availableFields);
     const gqlQuery = this.buildIcarContentQuery(
       contentArgs,
@@ -1997,7 +2037,7 @@ export class HasuraService {
     console.log('Content query mode:', queryMode, {
       hasura_namespace: this.nameSpace || '(none)',
       content_args: contentArgs,
-      uses_search_filters: !usesNamespace && Boolean(searchQuery),
+      uses_search_filters: queryMode === 'direct' && Boolean(searchQuery),
     });
 
     try {
