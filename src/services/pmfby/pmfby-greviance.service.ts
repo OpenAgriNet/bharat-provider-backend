@@ -67,9 +67,9 @@ export class PmfbyGrievanceService {
   ): Promise<any> {
     try {
       const token = await this.getFGMSToken();
-      console.log("token", token);
-      console.log("requestorMobileNo", requestorMobileNo);
-      console.log("grievanceSupportTicketNo", grievanceSupportTicketNo);
+      console.log("PMFBY grievance token", token);
+      console.log("PMFBY grievance requestorMobileNo", requestorMobileNo);
+      console.log("PMFBY grievance grievanceSupportTicketNo", grievanceSupportTicketNo);
       const response = await axios.request({
         method: "post",
         url: `${this.getBaseUrl()}/krphapi/FGMS/GetGrievenceTicketsStatus`,
@@ -81,7 +81,7 @@ export class PmfbyGrievanceService {
           requestorMobileNo,
           GrievenceSupportTicketNo: grievanceSupportTicketNo,
         },
-        timeout: 15000,
+        timeout: 60000,
       });
 
       this.logger.log(
