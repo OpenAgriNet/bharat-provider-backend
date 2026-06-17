@@ -1,6 +1,13 @@
 import { Module } from "@nestjs/common";
+import { APP_INTERCEPTOR } from "@nestjs/core";
+import { HttpLifecycleInterceptor } from "telemetry-wrap";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
+import {
+  BecknTelemetryInterceptor,
+  getTelemetryContext,
+  isTelemetryEnabled,
+} from "./telemetry";
 import { AuthModule } from "./auth/auth.module";
 import { AdminModule } from "./admin/admin.module";
 import { ConfigModule } from "@nestjs/config";
@@ -35,6 +42,19 @@ import { SmamService } from "./services/smam/smam.service";
   ],
   controllers: [AppController],
   providers: [
+    ...(isTelemetryEnabled()
+      ? [
+          {
+            provide: APP_INTERCEPTOR,
+            useClass: BecknTelemetryInterceptor,
+          },
+          {
+            provide: APP_INTERCEPTOR,
+            useFactory: () =>
+              new HttpLifecycleInterceptor(() => getTelemetryContext()),
+          },
+        ]
+      : []),
     AppService,
     LoggerService,
     HasuraService,
