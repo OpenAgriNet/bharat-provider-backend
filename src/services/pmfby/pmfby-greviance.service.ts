@@ -70,6 +70,19 @@ export class PmfbyGrievanceService {
       console.log("PMFBY grievance token", token);
       console.log("PMFBY grievance requestorMobileNo", requestorMobileNo);
       console.log("PMFBY grievance grievanceSupportTicketNo", grievanceSupportTicketNo);
+
+
+      const curlCommand = `curl -X POST '${this.getBaseUrl()}/krphapi/FGMS/GetGrievenceTicketsStatus' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Authorization: ${token}' \\
+  -d '${JSON.stringify({
+    requestorMobileNo,
+    GrievenceSupportTicketNo: grievanceSupportTicketNo,
+  })}'`;
+
+this.logger.log("PMFBY grievance curl: " + curlCommand);
+
+
       const response = await axios.request({
         method: "post",
         url: `${this.getBaseUrl()}/krphapi/FGMS/GetGrievenceTicketsStatus`,
