@@ -259,8 +259,7 @@ export class AppService {
     try {
       const resp = await this.hasuraService.findIcarContent(query);
       console.log("resp", JSON.stringify(resp.data, null, 2));
-      const icarResponse: any =
-        this.hasuraService.extractIcarContentResponse(resp);
+      const icarResponse: any = resp.data.Content;
       console.log("icarResponse", icarResponse.length);
       const catalog = IcarCatalogGenerator(icarResponse, query);
       body.context.action = "on_search";
@@ -350,8 +349,7 @@ export class AppService {
       }
 
       const resp = await this.hasuraService.findIcarContent(searchQuery);
-      const icarResponse: any =
-        this.hasuraService.extractIcarContentResponse(resp);
+      const icarResponse: any = resp.data.icar_.Content;
       for (let item of icarResponse) {
         if (item.icon) {
           if (!this.isValidUrl(item.icon)) {
@@ -2229,8 +2227,11 @@ export class AppService {
       console.log("Scheme search query generated=======>>>> ", JSON.stringify(searchQuery, null, 2));
       const resp = await this.hasuraService.findIcarContent(searchQuery);
 
+      // const icarResponse: any = resp.data.icar_.Content;
       const icarResponse: any =
-        this.hasuraService.extractIcarContentResponse(resp);
+        process.env.NODE_ENV === "dev"
+          ? resp.data.icar_.Content
+          : resp.data.Content;
       // console.log("icarResponse=======>>>> ", JSON.stringify(icarResponse, null, 2));
       for (let item of icarResponse) {
         if (item.icon) {

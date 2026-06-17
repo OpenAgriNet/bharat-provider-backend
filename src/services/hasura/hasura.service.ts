@@ -8,52 +8,6 @@ export class HasuraService {
   private hasuraUrl = process.env.HASURA_URL;
   private adminSecretKey = process.env.HASURA_GRAPHQL_ADMIN_SECRET;
   private nameSpace = process.env.HASURA_NAMESPACE;
-  private contentSchemaFieldsCache: Set<string> | null = null;
-  private contentQueryModeCache: 'direct' | 'namespaced' | null = null;
-  private contentSchemaCacheExpiry = 0;
-  private readonly contentSchemaCacheTtlMs = 5 * 60 * 1000;
-
-  private readonly icarContentFieldSelections: Record<string, string> = {
-    branch: 'branch',
-    contentType: 'contentType',
-    content_id: 'content_id',
-    crop: 'crop',
-    description: 'description',
-    district: 'district',
-    expiryDate: 'expiryDate',
-    fileType: 'fileType',
-    icon: 'icon',
-    id: 'id',
-    language: 'language',
-    monthOrSeason: 'monthOrSeason',
-    publishDate: 'publishDate',
-    publisher: 'publisher',
-    region: 'region',
-    state: 'state',
-    target_users: 'target_users',
-    title: 'title',
-    url: 'url',
-    user_id: 'user_id',
-    mimetype: 'mimetype',
-    scheme_id: 'scheme_id',
-    agri_domain: 'agri_domain',
-    scheme_intro: 'scheme_intro',
-    scope: 'scope',
-    scheme_benefits: 'scheme_benefits',
-    scheme_eligibility: 'scheme_eligibility',
-    scheme_support: 'scheme_support',
-    scheme_misc: 'scheme_misc',
-    scheme_application: 'scheme_application',
-    scheme_exclusion: 'scheme_exclusion',
-    faq_url: 'faq_url',
-    ContentRatingRelationship: `ContentRatingRelationship {
-            content_id
-            id
-            ratingValue
-            user_id
-            feedback
-          }`,
-  };
 
   constructor(private readonly logger: LoggerService) { }
 
@@ -1859,196 +1813,113 @@ export class HasuraService {
   }
 
 
-  private isSchemaCacheValid(): boolean {
-    return (
-      this.contentSchemaFieldsCache !== null &&
-      this.contentQueryModeCache !== null &&
-      Date.now() < this.contentSchemaCacheExpiry
-    );
-  }
-
-  private resolveQueryModeFromRootFields(
-    rootFields: string[],
-  ): 'direct' | 'namespaced' {
-    if (rootFields.includes('Content')) {
-      return 'direct';
-    }
-
-    if (this.nameSpace && rootFields.includes(this.nameSpace)) {
-      return 'namespaced';
-    }
-
-    if (this.nameSpace) {
-      console.log(
-        `HASURA_NAMESPACE="${this.nameSpace}" not found on query_root; using direct Content query`,
-      );
-    }
-
-    return 'direct';
-  }
-
-  private async introspectHasuraContentSchema(): Promise<{
-    fields: Set<string>;
-    queryMode: 'direct' | 'namespaced';
-  }> {
-    if (
-      this.isSchemaCacheValid() &&
-      this.contentSchemaFieldsCache &&
-      this.contentQueryModeCache
-    ) {
-      return {
-        fields: this.contentSchemaFieldsCache,
-        queryMode: this.contentQueryModeCache,
-      };
-    }
-
-    const introspectionQuery = `query IntrospectHasuraContentSchema {
-      contentType: __type(name: "Content") {
-        fields {
-          name
-        }
-      }
-      queryRoot: __type(name: "query_root") {
-        fields {
-          name
-        }
-      }
-    }`;
-
-    const response = await this.queryDb(introspectionQuery);
-    const contentFields = response?.data?.contentType?.fields;
-    const rootFields: string[] =
-      response?.data?.queryRoot?.fields?.map(
-        (field: { name: string }) => field.name,
-      ) ?? [];
-
-    if (!Array.isArray(contentFields)) {
-      this.logger.error(
-        'Content schema introspection failed; using configured field list as fallback',
-        JSON.stringify(response?.errors ?? response),
-      );
-      this.contentSchemaFieldsCache = new Set(
-        Object.keys(this.icarContentFieldSelections),
-      );
-    } else {
-      this.contentSchemaFieldsCache = new Set(
-        contentFields.map((field: { name: string }) => field.name),
-      );
-    }
-
-    this.contentQueryModeCache = this.resolveQueryModeFromRootFields(rootFields);
-    this.contentSchemaCacheExpiry = Date.now() + this.contentSchemaCacheTtlMs;
-
-    return {
-      fields: this.contentSchemaFieldsCache,
-      queryMode: this.contentQueryModeCache,
-    };
-  }
-
-  /**
-   * Prod (direct): dynamic where/limit from search filters.
-   * Dev (namespaced): fixed limit only, no filter args.
-   */
-  private buildContentArgs(
-    searchQuery: string | undefined,
-    queryMode: 'direct' | 'namespaced',
-  ): string {
-    if (queryMode === 'namespaced') {
-      return '(limit: 10)';
-    }
-
+  async findIcarContent(searchQuery?: string) {
+    const isProd = process.env.NODE_ENV === 'prod';
+    console.log("isProd", isProd);
+    let contentArgs = '';
+    let gqlQuery = '';
     if (!searchQuery) {
-      return '(limit: 10)';
+      contentArgs = '(limit: 10)';
+    } else {
+      // Remove closing `)` and add limit
+      contentArgs = searchQuery.replace(/\)\s*$/, '') + ', limit: 100)';
     }
 
-    return searchQuery.replace(/\)\s*$/, '') + ', limit: 100)';
-  }
-
-  extractIcarContentResponse(response: any): any[] | undefined {
-    if (response?.data?.Content) {
-      return response.data.Content;
-    }
-
-    if (this.nameSpace && response?.data?.[this.nameSpace]?.Content) {
-      return response.data[this.nameSpace].Content;
-    }
-
-    return undefined;
-  }
-
-  private buildIcarContentFieldSelection(availableFields: Set<string>): string {
-    const selectedFields: string[] = [];
-    const skippedFields: string[] = [];
-
-    for (const [fieldName, selection] of Object.entries(
-      this.icarContentFieldSelections,
-    )) {
-      if (availableFields.has(fieldName)) {
-        selectedFields.push(selection);
-      } else {
-        skippedFields.push(fieldName);
-      }
-    }
-
-    if (skippedFields.length > 0) {
-      console.log(
-        'Skipping Content fields not present in Hasura schema:',
-        skippedFields.join(', '),
-      );
-    }
-
-    return selectedFields.join('\n          ');
-  }
-
-  private buildIcarContentQuery(
-    contentArgs: string,
-    fieldSelection: string,
-    queryMode: 'direct' | 'namespaced',
-  ): string {
-    if (queryMode === 'direct') {
-      return `query MyQuery {
+    if (isProd) {
+      gqlQuery = `query MyQuery {
         Content${contentArgs} {
-          ${fieldSelection}
+          branch
+          contentType
+          content_id
+          crop
+          description
+          district
+          expiryDate
+          fileType
+          icon
+          id
+          language
+          monthOrSeason
+          publishDate
+          publisher
+          region
+          state
+          target_users
+          title
+          url
+          user_id
+          mimetype
+          scheme_id
+          ContentRatingRelationship {
+            content_id
+            id
+            ratingValue
+            user_id
+            feedback
+          }
+          agri_domain
+          scheme_intro
+          scope
+          scheme_benefits
+          scheme_eligibility
+          scheme_support
+          scheme_misc
+          scheme_application
+          # scheme_exclusion
+          faq_url
         }
-      }`;
-    }
-
-    return `query MyQuery {
+    }`;
+    } else {
+      gqlQuery = `query MyQuery {
         ${this.nameSpace} {
           Content${contentArgs} {
-            ${fieldSelection}
+            branch
+            contentType
+            content_id
+            crop
+            description
+            district
+            expiryDate
+            fileType
+            icon
+            id
+            language
+            monthOrSeason
+            publishDate
+            publisher
+            region
+            state
+            target_users
+            title
+            url
+            user_id
+            mimetype
+            scheme_id
+            ContentRatingRelationship {
+              content_id
+              id
+              ratingValue
+              user_id
+              feedback
+            }
+            agri_domain
+            scheme_intro
+            scope
+            scheme_benefits
+            scheme_eligibility
+            scheme_support
+            scheme_misc
+            scheme_application
+            scheme_exclusion
+            faq_url
           }
         }
       }`;
-  }
+    }
 
-  async findIcarContent(searchQuery?: string) {
-    const { fields: availableFields, queryMode } =
-      await this.introspectHasuraContentSchema();
-    const contentArgs = this.buildContentArgs(searchQuery, queryMode);
-    const fieldSelection = this.buildIcarContentFieldSelection(availableFields);
-    const gqlQuery = this.buildIcarContentQuery(
-      contentArgs,
-      fieldSelection,
-      queryMode,
-    );
-
-    console.log('gqlQuery generated=======>>>> ', gqlQuery);
-    console.log('Content query mode:', queryMode, {
-      hasura_namespace: this.nameSpace || '(none)',
-      content_args: contentArgs,
-      uses_search_filters: queryMode === 'direct' && Boolean(searchQuery),
-    });
-
+    console.log("gqlQuery generated=======>>>> ", gqlQuery);
     try {
       const response = await this.queryDb(gqlQuery);
-      if (response?.errors?.length) {
-        this.logger.error(
-          'Hasura query failed for ICAR content',
-          JSON.stringify(response.errors),
-        );
-        throw new HttpException('Unable to Fetch content!', HttpStatus.BAD_REQUEST);
-      }
       return response;
     } catch (error) {
       this.logger.error("Something Went wrong in creating Admin", error);
