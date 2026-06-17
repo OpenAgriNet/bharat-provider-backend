@@ -72,15 +72,13 @@ export class PmfbyGrievanceService {
       console.log("PMFBY grievance grievanceSupportTicketNo", grievanceSupportTicketNo);
 
 
-      const curlCommand = `curl -X POST '${this.getBaseUrl()}/krphapi/FGMS/GetGrievenceTicketsStatus' \\
-  -H 'Content-Type: application/json' \\
-  -H 'Authorization: ${token}' \\
-  -d '${JSON.stringify({
-    requestorMobileNo,
-    GrievenceSupportTicketNo: grievanceSupportTicketNo,
-  })}'`;
+      const curlCommand = `curl -X POST '${this.getBaseUrl()}/krphapi/FGMS/GetGrievenceTicketsStatus' -H 'Content-Type: application/json' -H 'Authorization: ${token}' -d '${JSON.stringify({
+        requestorMobileNo,
+        GrievenceSupportTicketNo: grievanceSupportTicketNo,
+      })}'`;
+      
+      this.logger.log("PMFBY grievance curl: " + curlCommand);
 
-this.logger.log("PMFBY grievance curl: " + curlCommand);
 
 
       const response = await axios.request({
