@@ -768,8 +768,8 @@ export class AppService {
     try {
       // Auto-detect the type if not provided
       let detectedType = type;
-      this.logger.log("detectedType: ", detectedType);
-      this.logger.log("mobileNumber: ", mobileNumber);
+      this.logger.log("PMKISAN detectedType: ", detectedType);
+      this.logger.log("PMKISAN mobileNumber: ", mobileNumber);
       // if (detectedType=="") {
       if (/^[6-9]\d{9}$/.test(mobileNumber)) {
         detectedType = "Mobile";
@@ -793,18 +793,18 @@ export class AppService {
         Token: process.env.PM_KISSAN_TOKEN,
       });
 
-      console.log("Request data: ", requestData);
+      console.log("PMKISAN Request data: ", requestData);
 
       // Encrypt the request data
       let encrypted_text = await encrypt(requestData, key);
-      console.log("encrypted text without @: ", encrypted_text);
+      console.log("PMKISAN encrypted text without @: ", encrypted_text);
 
       // Format the request data as expected by PM Kisan service
       let data = {
         EncryptedRequest: encrypted_text + "@" + key,
       };
 
-      console.log("(in sendOTP)the data in the data var is as: ", data);
+      console.log("PMKISAN (in sendOTP)the data in the data var is as: ", data);
 
       let config = {
         method: "post",
@@ -816,9 +816,9 @@ export class AppService {
         data: data,
         timeout: 10000, // 10 second timeout
       };
-      console.log(config);
+      console.log("PMKISAN config: ", config);
       let response: any = await axios.request(config);
-      console.log("sendOTP", response.status);
+      console.log("PMKISAN sendOTP response status: ", response.status);
 
       if (response.status >= 200 && response.status < 300) {
         response = await response.data;
@@ -829,7 +829,7 @@ export class AppService {
         ).split("@");
 
         if (!encryptedResponse) {
-          console.error("No encrypted response received");
+          console.error("PMKISAN No encrypted response received");
           return {
             d: {
               output: {
@@ -845,7 +845,7 @@ export class AppService {
           encryptedResponse,
           responseKey || key,
         );
-        console.log("Response from decryptedData(sendOTP)", decryptedData);
+        console.log("PMKISAN Response from decryptedData(sendOTP)", decryptedData);
 
         try {
           const parsedData = JSON.parse(decryptedData);
@@ -853,7 +853,7 @@ export class AppService {
           response["status"] =
             response.d.output.Rsponce !== "False" ? "OK" : "NOT_OK";
         } catch (e) {
-          console.error("Error parsing decrypted data:", e);
+          console.error("PMKISAN Error parsing decrypted data:", e);
           response["status"] = "NOT_OK";
         }
 
@@ -870,7 +870,7 @@ export class AppService {
       }
     } catch (error) {
       console.error(
-        "Error in sendOTP:",
+        "PMKISAN Error in sendOTP:",
         error.message,
         error.response?.data || error,
       );
@@ -885,7 +885,7 @@ export class AppService {
           error.message.includes('timeout') ||
           error.message.includes('connect') ||
           error.message.includes('ENOTFOUND')) {
-        console.log("Network connectivity issue detected - not sending OTP");
+        console.log("PMKISAN Network connectivity issue detected - not sending OTP");
         return {
           d: {
             output: {
@@ -2336,7 +2336,7 @@ export class AppService {
         );
       }
     } catch (error) {
-      console.log("ORDER_STATUS", error);
+      console.log("PMKISAN STATUS ERROR ORDER_STATUS", error);
       return this.createErrorResponse(
         body.context,
         "processing_error",
