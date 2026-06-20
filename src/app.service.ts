@@ -814,7 +814,7 @@ export class AppService {
           "Content-Type": "application/json",
         },
         data: data,
-        timeout: 10000, // 10 second timeout
+        timeout: 60000, // 1 minute timeout
       };
       console.log("PMKISAN config: ", config);
       let response: any = await axios.request(config);
