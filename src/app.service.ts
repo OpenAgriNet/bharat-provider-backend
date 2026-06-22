@@ -1036,9 +1036,10 @@ export class AppService {
           console.log("inside handleStatus: isPmfbyStatusRequest");
           return await this.handlePmfbyStatus(body, orderId);
         }
-        console.log(
-          "inside handleStatus: PMKISAN otp validate and status request",
-        );
+        console.log("PMKISAN inside handleStatus: PMKISAN otp validate and status request");
+        console.log("PMKISAN OTP::: ", orderId);
+        console.log("PMKISAN regNumber::: ", regNumber);
+        console.log("PMKISAN phoneNumber::: ", phoneNumber);
         return await this.handleOtpValidation(
           body,
           orderId,
