@@ -1033,12 +1033,15 @@ export class AppService {
       if (isOtpValidation) {
         // PMFBY: verify OTP + get policy/claim status via /status
         if (this.isPmfbyStatusRequest(body)) {
-          console.log("inside handleStatus: isPmfbyStatusRequest");
+          console.log("PMFBY inside handleStatus: isPmfbyStatusRequest");
           return await this.handlePmfbyStatus(body, orderId);
         }
         console.log(
-          "inside handleStatus: PMKISAN otp validate and status request",
+          "PMKISAN inside handleStatus: PMKISAN otp validate and status request",
         );
+        console.log("PMKISAN orderId::: ", orderId);
+        console.log("PMKISAN regNumber::: ", regNumber);
+        console.log("PMKISAN phoneNumber::: ", phoneNumber);
         return await this.handleOtpValidation(
           body,
           orderId,
