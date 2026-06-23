@@ -2165,7 +2165,8 @@ export class AppService {
     const query = intent?.item?.descriptor?.name;
     const tagGroup = intent?.item?.tags;
     const categoryCode = intent?.category?.descriptor?.code.toLowerCase();
-    const schemeCode = intent?.item?.descriptor?.name.toLowerCase();
+    // const schemeCode = intent?.item?.descriptor?.name.toLowerCase();
+    const schemeCode = (intent?.item?.descriptor?.name ?? intent?.item?.descriptor?.code)?.toLowerCase();
     const requestDomain = body.context.domain;
 
     const flattenedTags: any = {};
