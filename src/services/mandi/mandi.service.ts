@@ -91,11 +91,10 @@ export class MandiService {
       return {
         context: onSearchContext,
         message: {
-          catalog: {
-            status: "invalid_request",
-            message: "commodity name and gps/lat/lon required in intent",
-            prices: [],
-          },
+          catalog: this.catalogCompact.errorCatalog(
+            "invalid_request",
+            "commodity name and gps/lat/lon required in intent",
+          ),
         },
       };
     }
@@ -112,7 +111,7 @@ export class MandiService {
       const catalog = this.catalogCompact.ambiguous(resolved.query, resolved.options);
       this.logMandi(
         body,
-        `MANDI ambiguous commodity query=${resolved.query} options=${JSON.stringify(catalog.options ?? [])}`,
+        `MANDI ambiguous commodity query=${resolved.query}`,
       );
       return {
         context: onSearchContext,
@@ -148,22 +147,27 @@ export class MandiService {
         logCtx,
       );
 
-      const catalog = this.catalogCompact.compact(raw, intent, resolved.commodity);
+      const catalog = this.catalogCompact.buildFromVistaarLocation(
+        raw,
+        intent,
+        resolved.commodity,
+      );
+      const itemCount =
+        catalog.providers?.[0]?.items?.length ?? 0;
       this.logMandi(
         body,
-        `MANDI returning on_search commodity=${catalog.commodity ?? ""} location=${catalog.location ?? ""} date=${catalog.date ?? ""} price_count=${catalog.prices?.length ?? 0}`,
+        `MANDI returning on_search items=${itemCount} location=${intent.locationName} date=${intent.date}`,
       );
-      if (catalog.prices?.length) {
-        this.logMandi(
-          body,
-          `MANDI on_search prices: ${JSON.stringify(
-            catalog.prices.map((p) => ({
-              market: p.market,
-              modal: p.modal,
-              unit: p.unit,
-            })),
-          )}`,
+      if (itemCount > 0) {
+        const firstTags =
+          catalog.providers[0].items[0]?.tags?.[0]?.list ?? [];
+        const summary = Object.fromEntries(
+          firstTags.map((t: { descriptor?: { code?: string }; value?: string }) => [
+            t.descriptor?.code ?? "",
+            t.value,
+          ]),
         );
+        this.logMandi(body, `MANDI on_search sample price-info: ${JSON.stringify(summary)}`);
       }
 
       return {
@@ -321,77 +325,21 @@ export class MandiService {
     lat: number,
     lon: number,
   ): { descriptor: { name: string }; providers: any[] } {
-    const items: any[] = [];
-    let itemId = 0;
+    const allRecords: any[] = [];
 
     for (const { mandi, api } of results) {
       const records = this.normalizeApiRecords(api);
       for (const rec of records) {
-        itemId += 1;
-        const state = rec?.State ?? mandi.state ?? "N/A";
-        const district = rec?.District ?? mandi.district_name ?? "N/A";
-        const market = rec?.Market ?? mandi.marketcode ?? "N/A";
-        const commodity = rec?.Commodity ?? "N/A";
-        const tags: any[] = [
-          { descriptor: { code: "State" }, value: state },
-          { descriptor: { code: "District" }, value: district },
-          { descriptor: { code: "Market" }, value: market },
-          { descriptor: { code: "Commodity" }, value: commodity },
-          { descriptor: { code: "Modal Price" }, value: rec?.["Modal Price"] ?? "N/A" },
-          { descriptor: { code: "Min Price" }, value: rec?.["Min Price"] ?? "N/A" },
-          { descriptor: { code: "Max Price" }, value: rec?.["Max Price"] ?? "N/A" },
-          { descriptor: { code: "Price Unit" }, value: rec?.["Price Unit"] ?? "N/A" },
-          { descriptor: { code: "Arrival Date" }, value: rec?.["Arrival Date"] ?? "N/A" },
-        ];
-        if (rec?.Grade) tags.push({ descriptor: { code: "Grade" }, value: rec.Grade });
-        if (rec?.Group) tags.push({ descriptor: { code: "Group" }, value: rec.Group });
-        if (rec?.Variety) tags.push({ descriptor: { code: "Variety" }, value: rec.Variety });
-
-        items.push({
-          id: `mandi-${itemId}`,
-          descriptor: {
-            name: `${commodity} - ${market}`,
-            short_desc: `${commodity} at ${market}, ${district}, ${state}`,
-            images: [],
-          },
-          matched: true,
-          category_ids: ["mandi-price"],
-          fulfillment_ids: ["mandi-f1"],
-          tags: [{ descriptor: { code: "price-info" }, list: tags }],
+        allRecords.push({
+          ...rec,
+          State: rec?.State ?? mandi.state,
+          District: rec?.District ?? mandi.district_name,
+          Market: rec?.Market ?? mandi.marketcode,
         });
       }
     }
 
-    if (items.length === 0) {
-      return {
-        descriptor: { name: "Mandi Price Discovery" },
-        providers: [],
-      };
-    }
-
-    const provider = {
-      id: "mandi-price-discovery",
-      descriptor: {
-        name: "Mandi Price Discovery",
-        short_desc: "Agmarknet Vistaar mandi prices for location",
-        images: [],
-      },
-      categories: [
-        { id: "mandi-price", descriptor: { code: "mandi", name: "Mandi Price Discovery" } },
-      ],
-      fulfillments: [
-        {
-          id: "mandi-f1",
-          stops: [{ location: { lat: String(lat), lon: String(lon) } }],
-        },
-      ],
-      items,
-    };
-
-    return {
-      descriptor: { name: "Mandi Price Discovery" },
-      providers: [provider],
-    };
+    return this.catalogCompact.buildCatalogFromRecords(allRecords, lat, lon);
   }
 
   /**
