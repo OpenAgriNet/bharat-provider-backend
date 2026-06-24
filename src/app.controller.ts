@@ -115,7 +115,7 @@ export class AppController {
         return this.appService.mandiSearch(body);
 
       case "mandi-location":
-        this.logger.log("Inside Mandi v2");
+        this.logger.log("Inside Mandi (price-discovery) search");
         return this.appService.mandiLocationSearch(body);
 
       case "pmfby":

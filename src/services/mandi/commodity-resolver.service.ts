@@ -25,7 +25,9 @@ export class CommodityResolverService {
     const partial = await this.databaseService.findCommoditiesPartial(query, 5);
     if (partial.length === 1) return { status: "resolved", commodity: partial[0] };
     if (partial.length > 1) {
-      this.logger.log(`Ambiguous commodity "${query}" — ${partial.length} matches`);
+      this.logger.log(
+        `[MANDI] Ambiguous commodity "${query}" — ${partial.length} matches`,
+      );
       return { status: "ambiguous", query, options: partial.slice(0, 3) };
     }
 

@@ -19,8 +19,10 @@ export class AgmarknetApiService {
   private readonly accessName = process.env.AGMARKNET_ACCESS_NAME;
   private readonly password = process.env.AGMARKNET_PASSWORD;
 
-  async generateToken(): Promise<string> {
+  async generateToken(logLabel = "MANDI"): Promise<string> {
     const url = `${this.baseUrl}/v1/generate-dynamic-token-agmarknet`;
+    this.logger.log(`[${logLabel}] Calling Agmarknet generate-dynamic-token`);
+
     const response = await axios.post(
       url,
       { access_name: this.accessName, password: this.password },
@@ -30,13 +32,16 @@ export class AgmarknetApiService {
     if (!token) {
       throw new Error("Agmarknet token response missing token field");
     }
-    this.logger.log("Agmarknet dynamic token generated");
+    this.logger.log(`[${logLabel}] Agmarknet token generated`);
     return token;
   }
 
   async fetchMasterData(option = 2): Promise<any[]> {
-    const token = await this.generateToken();
+    const logLabel = "MANDI SYNC";
+    const token = await this.generateToken(logLabel);
     const url = `${this.baseUrl}/v1/fetch-agmarknet-master-data`;
+    this.logger.log(`[${logLabel}] Fetching master data option=${option}`);
+
     const response = await axios.get(url, {
       params: { token, option },
       timeout: 30000,
@@ -45,10 +50,14 @@ export class AgmarknetApiService {
     if (!Array.isArray(data)) {
       throw new Error(`Master data option=${option} did not return an array`);
     }
+    this.logger.log(`[${logLabel}] Master data fetched — ${data.length} commodities`);
     return data;
   }
 
-  async fetchVistaarLocation(params: VistaarLocationParams): Promise<any[]> {
+  async fetchVistaarLocation(
+    params: VistaarLocationParams,
+    logLabel = "MANDI",
+  ): Promise<any[]> {
     const url = `${this.baseUrl}/v1/fetch-agmarknet-vistaar-location`;
     const query = new URLSearchParams({
       commodity_id: String(params.commodityId),
@@ -58,10 +67,13 @@ export class AgmarknetApiService {
       long: String(params.lon),
     });
     this.logger.log(
-      `VISTAAR_LOCATION commodity_id=${params.commodityId} date=${params.date} lat=${params.lat} lon=${params.lon}`,
+      `[${logLabel}] Calling vistaar-location — commodity_id=${params.commodityId}, date=${params.date}, lat=${params.lat}, lon=${params.lon}`,
     );
+
     const response = await axios.get(`${url}?${query.toString()}`, { timeout: 30000 });
-    return this.normalizeRecords(response.data);
+    const records = this.normalizeRecords(response.data);
+    this.logger.log(`[${logLabel}] Vistaar-location returned ${records.length} row(s)`);
+    return records;
   }
 
   normalizeRecords(data: any): any[] {

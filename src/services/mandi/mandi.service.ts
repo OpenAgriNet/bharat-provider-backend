@@ -4,7 +4,10 @@ import { format } from "date-fns";
 import { DatabaseService, MandiMasterRow } from "../weatherforecast/database.service";
 import { AgmarknetApiService } from "./agmarknet-api.service";
 import { BecknContextService } from "./beckn-context.service";
-import { CatalogCompactService } from "./catalog-compact.service";
+import {
+  CatalogCompactService,
+  CompactMandiCatalog,
+} from "./catalog-compact.service";
 import { CommodityResolverService } from "./commodity-resolver.service";
 
 export interface AgmarknetVistaarParams {
@@ -30,6 +33,42 @@ export class MandiService {
     private readonly catalogCompact: CatalogCompactService,
   ) {}
 
+  private summarizeReceived(body: any): Record<string, unknown> {
+    const intent = body?.message?.intent;
+    const endLoc = intent?.fulfillment?.end?.location;
+    const stopLoc = intent?.fulfillment?.stops?.[0]?.location;
+    const location = endLoc || stopLoc;
+    const dateTag = intent?.tags?.find((t: { code?: string }) => t.code === "date")?.value;
+
+    return {
+      transaction_id: body?.context?.transaction_id,
+      commodity: intent?.item?.descriptor?.name,
+      location: location?.descriptor?.name,
+      gps: location?.gps,
+      lat: location?.lat,
+      lon: location?.lon,
+      date: dateTag,
+    };
+  }
+
+  private summarizeCatalog(catalog: CompactMandiCatalog): Record<string, unknown> {
+    return {
+      status: catalog.status,
+      commodity: catalog.commodity,
+      commodity_id: catalog.commodity_id,
+      location: catalog.location,
+      date: catalog.date,
+      price_count: catalog.prices?.length ?? 0,
+      prices: catalog.prices?.map((p) => ({
+        market: p.market,
+        modal: p.modal,
+        unit: p.unit,
+      })),
+      options: catalog.options,
+      message: catalog.message,
+    };
+  }
+
   /**
    * New mandi flow (schemes:vistaar + item.name + gps):
    * item.descriptor.name (string) + gps → Postgres commodity resolve → vistaar-location → compact catalog.
@@ -40,10 +79,14 @@ export class MandiService {
   }): Promise<{ context: any; message?: any }> {
     const onSearchContext = { ...body.context, action: "on_search" };
 
+    this.logger.log(
+      `[MANDI] Received search — ${JSON.stringify(this.summarizeReceived(body))}`,
+    );
+
     const intent = this.becknContext.parseMandiLocationIntent(body);
     if (!intent) {
       this.logger.warn(
-        "Mandi v2: missing commodity name or location (gps/lat/lon) in intent",
+        "[MANDI] Invalid request — commodity name and gps/lat/lon are required",
       );
       return {
         context: onSearchContext,
@@ -58,24 +101,37 @@ export class MandiService {
     }
 
     this.logger.log(
-      `MANDI_V2 commodity="${intent.commodityName}" lat=${intent.lat} lon=${intent.lon} date=${intent.date}`,
+      `[MANDI] Parsed intent — commodity="${intent.commodityName}", location="${intent.locationName}", lat=${intent.lat}, lon=${intent.lon}, date=${intent.date}`,
     );
 
+    this.logger.log(`[MANDI] Looking up commodity "${intent.commodityName}" in Postgres`);
     const resolved = await this.commodityResolver.resolve(intent.commodityName);
 
     if (resolved.status === "ambiguous") {
+      const catalog = this.catalogCompact.ambiguous(resolved.query, resolved.options);
+      this.logger.log(
+        `[MANDI] Ambiguous commodity — returning options — ${JSON.stringify(this.summarizeCatalog(catalog))}`,
+      );
       return {
         context: onSearchContext,
-        message: { catalog: this.catalogCompact.ambiguous(resolved.query, resolved.options) },
+        message: { catalog },
       };
     }
 
     if (resolved.status === "not_found") {
+      const catalog = this.catalogCompact.notFound(resolved.query);
+      this.logger.log(
+        `[MANDI] Commodity not found — ${JSON.stringify(this.summarizeCatalog(catalog))}`,
+      );
       return {
         context: onSearchContext,
-        message: { catalog: this.catalogCompact.notFound(resolved.query) },
+        message: { catalog },
       };
     }
+
+    this.logger.log(
+      `[MANDI] Resolved "${intent.commodityName}" → id=${resolved.commodity.commodity_id}, name="${resolved.commodity.commodity_name}", group="${resolved.commodity.group_name ?? ""}"`,
+    );
 
     try {
       const token = await this.agmarknetApi.generateToken();
@@ -89,7 +145,7 @@ export class MandiService {
 
       const catalog = this.catalogCompact.compact(raw, intent, resolved.commodity);
       this.logger.log(
-        `MANDI_V2 result commodity_id=${resolved.commodity.commodity_id} rows=${catalog.prices.length}`,
+        `[MANDI] Returning on_search — ${JSON.stringify(this.summarizeCatalog(catalog))}`,
       );
 
       return {
@@ -97,7 +153,10 @@ export class MandiService {
         message: { catalog },
       };
     } catch (err) {
-      this.logger.error("Mandi v2 search failed", err);
+      this.logger.error(
+        `[MANDI] Search failed for commodity="${intent.commodityName}", location="${intent.locationName}" — ${(err as Error).message}`,
+        (err as any)?.response?.data ?? "",
+      );
       throw err;
     }
   }

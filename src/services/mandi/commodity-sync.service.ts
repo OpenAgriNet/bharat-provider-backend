@@ -15,20 +15,20 @@ export class CommoditySyncService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     if (this.isSyncDisabled()) {
-      this.logger.warn("Commodity sync disabled (COMMODITY_SYNC_ENABLED=false)");
+      this.logger.warn("[MANDI SYNC] Commodity sync disabled (COMMODITY_SYNC_ENABLED=false)");
       return;
     }
     try {
       await this.databaseService.ensureCommodityTables();
       const count = await this.databaseService.countCommodities();
       if (count === 0) {
-        this.logger.log("Commodity cache empty — initial sync from Agmarknet");
+        this.logger.log("[MANDI SYNC] Commodity cache empty — initial sync from Agmarknet");
         await this.syncCommodityMaster("startup");
       } else {
-        this.logger.log(`Commodity cache ready — ${count} rows`);
+        this.logger.log(`[MANDI SYNC] Commodity cache ready — ${count} rows`);
       }
     } catch (err) {
-      this.logger.warn(`Commodity cache init skipped: ${(err as Error).message}`);
+      this.logger.warn(`[MANDI SYNC] Commodity cache init skipped: ${(err as Error).message}`);
     }
   }
 
@@ -39,11 +39,11 @@ export class CommoditySyncService implements OnModuleInit {
   @Cron(process.env.COMMODITY_SYNC_CRON || CronExpression.EVERY_WEEK)
   async weeklyCommoditySync(): Promise<void> {
     if (this.isSyncDisabled()) return;
-    this.logger.log("Weekly commodity cache refresh started");
+    this.logger.log("[MANDI SYNC] Weekly commodity cache refresh started");
     try {
       await this.syncCommodityMaster("weekly_cron");
     } catch (err) {
-      this.logger.error(`Weekly commodity sync failed: ${(err as Error).message}`);
+      this.logger.error(`[MANDI SYNC] Weekly commodity sync failed: ${(err as Error).message}`);
     }
   }
 
@@ -52,13 +52,13 @@ export class CommoditySyncService implements OnModuleInit {
    */
   async syncCommodityMaster(trigger: "startup" | "weekly_cron" | "manual" = "manual"): Promise<number> {
     if (this.syncInProgress) {
-      this.logger.warn(`Commodity sync already in progress — skipping (${trigger})`);
+      this.logger.warn(`[MANDI SYNC] Commodity sync already in progress — skipping (${trigger})`);
       return 0;
     }
     this.syncInProgress = true;
     try {
       const beforeCount = await this.databaseService.countCommodities();
-      this.logger.log(`Commodity sync [${trigger}] — clearing ${beforeCount} old rows`);
+      this.logger.log(`[MANDI SYNC] Commodity sync [${trigger}] — clearing ${beforeCount} old rows`);
 
       const master = await this.agmarknetApi.fetchMasterData(2);
       const rows = master
@@ -71,7 +71,7 @@ export class CommoditySyncService implements OnModuleInit {
 
       await this.databaseService.replaceCommodityMaster(rows, trigger);
       this.logger.log(
-        `Commodity sync [${trigger}] complete — replaced ${beforeCount} → ${rows.length} rows`,
+        `[MANDI SYNC] Commodity sync [${trigger}] complete — replaced ${beforeCount} → ${rows.length} rows`,
       );
       return rows.length;
     } finally {
