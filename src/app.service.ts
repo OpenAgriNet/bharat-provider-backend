@@ -911,7 +911,10 @@ export class AppService {
     mobileNumber: string,
     otp: string,
     type?: string,
+    transactionId?: string,
   ): Promise<any> {
+    const logCtx = `[verifyOTP][txn:${transactionId ?? "unknown"}]`;
+
     try {
       // Auto-detect the type if not provided
       let detectedType = type;
@@ -934,8 +937,9 @@ export class AppService {
       // detectedType = "Ben_id";
       // }
 
-      console.log(
-        `Detected type for verification ${mobileNumber}: ${detectedType}`,
+      this.logger.log(
+        `Detected type for verification | mobileNumber=${mobileNumber} detectedType=${detectedType}`,
+        logCtx,
       );
 
       const requestData = JSON.stringify({
@@ -944,19 +948,16 @@ export class AppService {
         OTP: String(otp),
         Token: String(process.env.PM_KISSAN_TOKEN),
       });
-      console.log("Request data: ", requestData);
+      this.logger.log(`Request data prepared | types=${detectedType}`, logCtx);
       let key = getUniqueKey();
       let encrypted_text = await encrypt(requestData, key); //without @
 
-      console.log("encrypted text without @: ", encrypted_text);
+      this.logger.log("Encrypted request payload prepared", logCtx);
 
       let data = {
         EncryptedRequest: `${encrypted_text}@${key}`,
       };
-      console.log(
-        "(inside verifyOTP)the data in the data var is : ",
-        JSON.stringify(data, null, 2),
-      );
+      this.logger.log("Sending ChatbotOTPVerified request", logCtx);
       let config = {
         method: "post",
         maxBodyLength: Infinity,
@@ -972,21 +973,35 @@ export class AppService {
       if (response.status >= 200 && response.status < 300) {
         response = await response.data;
         let decryptedData: any = await decryptRequest(response.d.output, key);
-        // console.log("Response of VerifyOTP", response);
-        console.log("Response from decryptedData(verifyOTP)", decryptedData);
+        this.logger.log(
+          `ChatbotOTPVerified response decrypted | response=${decryptedData}`,
+          logCtx,
+        );
 
         try {
           const parsedDecryptedData = JSON.parse(decryptedData);
           response.d.output = parsedDecryptedData;
           response["status"] =
             parsedDecryptedData.Rsponce === "True" ? "OK" : "NOT_OK";
+          this.logger.log(
+            `OTP verification result | status=${response["status"]}`,
+            logCtx,
+          );
         } catch (e) {
-          console.error("Error parsing decrypted data:", e);
+          this.logger.error(
+            `Error parsing decrypted verifyOTP response: ${e.message}`,
+            e.stack,
+            logCtx,
+          );
           response["status"] = "NOT_OK";
         }
 
         return response;
       } else {
+        this.logger.warn(
+          `ChatbotOTPVerified returned non-success HTTP status | status=${response.status}`,
+          logCtx,
+        );
         return {
           d: {
             output: {
@@ -997,7 +1012,11 @@ export class AppService {
         };
       }
     } catch (error) {
-      console.error("Error in verifyOTP:", error);
+      this.logger.error(
+        `verifyOTP failed: ${error.message}`,
+        error.stack,
+        logCtx,
+      );
       return {
         d: {
           output: {
@@ -1010,10 +1029,14 @@ export class AppService {
   }
 
   async handleStatus(body: any) {
-    // console.log("Input body:", JSON.stringify(body, null, 2));
+    const transactionId = body?.context?.transaction_id;
+    const logCtx = `[handleStatus][txn:${transactionId ?? "unknown"}]`;
 
     try {
+      this.logger.log("Received status request", logCtx);
+
       if (this.isPmfbyGrievanceStatusRequest(body)) {
+        this.logger.log("Routing to PMFBY grievance status handler", logCtx);
         return await this.handlePmfbyGrievanceStatus(body);
       }
 
@@ -1021,6 +1044,10 @@ export class AppService {
       const regNumber = body.message?.registration_number;
       const phoneNumber = body.message?.phone_number;
       if (!orderId && !regNumber) {
+        this.logger.warn(
+          "Missing order_id and registration_number",
+          logCtx,
+        );
         return this.createStatusErrorResponse(
           body.context,
           "missing_order_id_or_registration_number",
@@ -1033,15 +1060,13 @@ export class AppService {
       if (isOtpValidation) {
         // PMFBY: verify OTP + get policy/claim status via /status
         if (this.isPmfbyStatusRequest(body)) {
-          console.log("PMFBY inside handleStatus: isPmfbyStatusRequest");
+          this.logger.log("Routing to PMFBY OTP status handler", logCtx);
           return await this.handlePmfbyStatus(body, orderId);
         }
-        console.log(
-          "PMKISAN inside handleStatus: PMKISAN otp validate and status request",
+        this.logger.log(
+          `Routing to PMKISAN OTP validation | orderId=${orderId} regNumber=${regNumber ?? ""} phoneNumber=${phoneNumber ?? ""}`,
+          logCtx,
         );
-        console.log("PMKISAN orderId::: ", orderId);
-        console.log("PMKISAN regNumber::: ", regNumber);
-        console.log("PMKISAN phoneNumber::: ", phoneNumber);
         return await this.handleOtpValidation(
           body,
           orderId,
@@ -1051,15 +1076,21 @@ export class AppService {
       }
 
       // Handle other status requests if needed
+      this.logger.warn(
+        `Invalid status request | orderId=${orderId ?? ""} regNumber=${regNumber ?? ""}`,
+        logCtx,
+      );
       return this.createStatusErrorResponse(
         body.context,
         "invalid_request",
         "Invalid status request",
       );
     } catch (err) {
-      console.error("❌ Error in handleStatus:", err);
-      console.error("❌ Error message:", err.message);
-      console.error("❌ Error stack:", err.stack);
+      this.logger.error(
+        `handleStatus failed: ${err.message}`,
+        err.stack,
+        logCtx,
+      );
       throw new InternalServerErrorException(err.message, { cause: err });
     }
   }
@@ -1575,7 +1606,15 @@ export class AppService {
     regNumber: string,
     phoneNumber: string,
   ) {
+    const transactionId = body?.context?.transaction_id;
+    const logCtx = `[handleOtpValidation][txn:${transactionId ?? "unknown"}]`;
+
     try {
+      this.logger.log(
+        `Starting OTP validation | orderId=${orderId} regNumber=${regNumber ?? ""} phoneNumber=${phoneNumber ?? ""}`,
+        logCtx,
+      );
+
       // const storedData = this.tempOTPStore;
 
       // if (!storedData?.mobileNumber) {
@@ -1588,9 +1627,19 @@ export class AppService {
 
       // TODO: comment for now implement OTP later
       // Verify OTP
-      const verifyResponse = await this.verifyOTP(regNumber, orderId);
+      this.logger.log("Calling verifyOTP", logCtx);
+      const verifyResponse = await this.verifyOTP(
+        regNumber,
+        orderId,
+        undefined,
+        transactionId,
+      );
 
       if (verifyResponse.status !== "OK") {
+        this.logger.warn(
+          `OTP verification failed | status=${verifyResponse.status}`,
+          logCtx,
+        );
         return this.createStatusErrorResponse(
           body.context,
           "invalid_otp",
@@ -1598,7 +1647,7 @@ export class AppService {
         );
       }
 
-      console.log("✅ OTP validation successful!");
+      this.logger.log("OTP validation successful", logCtx);
       // console.log("✅ OTP IS SKIPPED!");
       // Clear OTP after successful validation
       // this.clearTempOTPStore();
@@ -1617,7 +1666,12 @@ export class AppService {
           queryType: "status",
         };
 
+        this.logger.log(
+          `Fetching user data | identifier=${context.userAadhaarNumber}`,
+          logCtx,
+        );
         const userDataResponse = await this.fetchUserData(context, {});
+        this.logger.log("User data fetched successfully", logCtx);
         return this.createSuccessResponse(
           body.context,
           orderId,
@@ -1625,7 +1679,11 @@ export class AppService {
           userDataResponse,
         );
       } catch (fetchError) {
-        console.error("❌ Error in fetchUserData:", fetchError);
+        this.logger.error(
+          `fetchUserData failed: ${fetchError.message}`,
+          fetchError.stack,
+          logCtx,
+        );
         return this.createFetchErrorResponse(
           body.context,
           orderId,
@@ -1634,7 +1692,11 @@ export class AppService {
         );
       }
     } catch (error) {
-      console.error("❌ Error in OTP validation:", error);
+      this.logger.error(
+        `OTP validation failed: ${error.message}`,
+        error.stack,
+        logCtx,
+      );
       return this.createStatusErrorResponse(
         body.context,
         "otp_validation_failed",

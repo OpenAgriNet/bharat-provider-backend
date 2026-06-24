@@ -6,11 +6,19 @@ export class LoggerService {
     private logger: winston.Logger;
 
     constructor() {
+        const stringFormat = winston.format.printf(
+            ({ timestamp, level, message, context, trace }) => {
+                const prefix = context ? `${context} ` : '';
+                const traceSuffix = trace ? `\n${trace}` : '';
+                return `${timestamp} [${String(level).toUpperCase()}] ${prefix}${message}${traceSuffix}`;
+            },
+        );
+
         this.logger = winston.createLogger({
             level: 'info',
             format: winston.format.combine(
                 winston.format.timestamp(),
-                winston.format.json()
+                stringFormat,
             ),
             transports: [
                 new winston.transports.Console(),
@@ -21,7 +29,7 @@ export class LoggerService {
     }
 
     log(message: string, context?: string, level: string = "info") {
-        this.logger.log({level, message, context });
+        this.logger.log({ level, message, context });
     }
 
     error(message: string, trace: string, context?: string) {
