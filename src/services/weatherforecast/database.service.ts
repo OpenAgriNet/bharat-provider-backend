@@ -31,17 +31,22 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       process.env[`${prefix}_SSLMODE`] ||
       process.env[`${fallbackPrefix}_SSLMODE`] ||
       process.env.IMD_DB_SSLMODE ||
+      process.env.DB_SSLMODE ||
       ""
     ).toLowerCase();
     const sslEnabledFromMode = ["require", "verify-ca", "verify-full", "no-verify"].includes(sslMode);
     const sslEnabled = this.parseBoolean(
-      process.env[`${prefix}_SSL`] || process.env[`${fallbackPrefix}_SSL`] || process.env.IMD_DB_SSL,
+      process.env[`${prefix}_SSL`] ||
+        process.env[`${fallbackPrefix}_SSL`] ||
+        process.env.IMD_DB_SSL ||
+        process.env.DB_SSL,
       sslEnabledFromMode,
     );
     const rejectUnauthorized = this.parseBoolean(
       process.env[`${prefix}_SSL_REJECT_UNAUTHORIZED`] ||
         process.env[`${fallbackPrefix}_SSL_REJECT_UNAUTHORIZED`] ||
-        process.env.IMD_DB_SSL_REJECT_UNAUTHORIZED,
+        process.env.IMD_DB_SSL_REJECT_UNAUTHORIZED ||
+        process.env.DB_SSL_REJECT_UNAUTHORIZED,
       false,
     );
 
