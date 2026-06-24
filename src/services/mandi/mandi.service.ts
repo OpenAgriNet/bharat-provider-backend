@@ -1,13 +1,11 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import axios from "axios";
 import { format } from "date-fns";
+import { LoggerService } from "../logger/logger.service";
 import { DatabaseService, MandiMasterRow } from "../weatherforecast/database.service";
 import { AgmarknetApiService } from "./agmarknet-api.service";
 import { BecknContextService } from "./beckn-context.service";
-import {
-  CatalogCompactService,
-  CompactMandiCatalog,
-} from "./catalog-compact.service";
+import { CatalogCompactService } from "./catalog-compact.service";
 import { CommodityResolverService } from "./commodity-resolver.service";
 
 export interface AgmarknetVistaarParams {
@@ -21,7 +19,6 @@ export interface AgmarknetVistaarParams {
 
 @Injectable()
 export class MandiService {
-  private readonly logger = new Logger(MandiService.name);
   private readonly baseUrl = process.env.MANDI_BASE_URL;
   private readonly token = process.env.MANDI_TOKEN;
 
@@ -31,9 +28,23 @@ export class MandiService {
     private readonly commodityResolver: CommodityResolverService,
     private readonly agmarknetApi: AgmarknetApiService,
     private readonly catalogCompact: CatalogCompactService,
+    private readonly logger: LoggerService,
   ) {}
 
-  private summarizeReceived(body: any): Record<string, unknown> {
+  private logCtx(body: any, operation = "mandiLocationSearch"): string {
+    const transactionId = body?.context?.transaction_id;
+    return `[${operation}][txn:${transactionId ?? "unknown"}]`;
+  }
+
+  private logMandi(body: any, message: string, operation = "mandiLocationSearch"): void {
+    this.logger.log(message, this.logCtx(body, operation));
+  }
+
+  private warnMandi(body: any, message: string, operation = "mandiLocationSearch"): void {
+    this.logger.warn(message, this.logCtx(body, operation));
+  }
+
+  private summarizeSearchParams(body: any): Record<string, unknown> {
     const intent = body?.message?.intent;
     const endLoc = intent?.fulfillment?.end?.location;
     const stopLoc = intent?.fulfillment?.stops?.[0]?.location;
@@ -41,31 +52,12 @@ export class MandiService {
     const dateTag = intent?.tags?.find((t: { code?: string }) => t.code === "date")?.value;
 
     return {
-      transaction_id: body?.context?.transaction_id,
       commodity: intent?.item?.descriptor?.name,
       location: location?.descriptor?.name,
       gps: location?.gps,
       lat: location?.lat,
       lon: location?.lon,
       date: dateTag,
-    };
-  }
-
-  private summarizeCatalog(catalog: CompactMandiCatalog): Record<string, unknown> {
-    return {
-      status: catalog.status,
-      commodity: catalog.commodity,
-      commodity_id: catalog.commodity_id,
-      location: catalog.location,
-      date: catalog.date,
-      price_count: catalog.prices?.length ?? 0,
-      prices: catalog.prices?.map((p) => ({
-        market: p.market,
-        modal: p.modal,
-        unit: p.unit,
-      })),
-      options: catalog.options,
-      message: catalog.message,
     };
   }
 
@@ -78,15 +70,23 @@ export class MandiService {
     message?: any;
   }): Promise<{ context: any; message?: any }> {
     const onSearchContext = { ...body.context, action: "on_search" };
+    const ctx = body?.context ?? {};
+    const searchParams = this.summarizeSearchParams(body);
 
-    this.logger.log(
-      `[MANDI] Received search — ${JSON.stringify(this.summarizeReceived(body))}`,
+    this.logMandi(
+      body,
+      `MANDI received search request message_id=${ctx.message_id ?? ""} domain=${ctx.domain ?? ""} action=${ctx.action ?? ""} bap_id=${ctx.bap_id ?? ""}`,
+    );
+    this.logMandi(
+      body,
+      `MANDI search params commodity=${searchParams.commodity ?? ""} location=${searchParams.location ?? ""} gps=${searchParams.gps ?? ""} lat=${searchParams.lat ?? ""} lon=${searchParams.lon ?? ""} date=${searchParams.date ?? ""}`,
     );
 
     const intent = this.becknContext.parseMandiLocationIntent(body);
     if (!intent) {
-      this.logger.warn(
-        "[MANDI] Invalid request — commodity name and gps/lat/lon are required",
+      this.warnMandi(
+        body,
+        "MANDI invalid request missing commodity name or gps/lat/lon",
       );
       return {
         context: onSearchContext,
@@ -100,17 +100,19 @@ export class MandiService {
       };
     }
 
-    this.logger.log(
-      `[MANDI] Parsed intent — commodity="${intent.commodityName}", location="${intent.locationName}", lat=${intent.lat}, lon=${intent.lon}, date=${intent.date}`,
+    this.logMandi(
+      body,
+      `MANDI parsed intent commodity=${intent.commodityName} location=${intent.locationName} lat=${intent.lat} lon=${intent.lon} date=${intent.date}`,
     );
 
-    this.logger.log(`[MANDI] Looking up commodity "${intent.commodityName}" in Postgres`);
+    this.logMandi(body, `MANDI looking up commodity in Postgres query=${intent.commodityName}`);
     const resolved = await this.commodityResolver.resolve(intent.commodityName);
 
     if (resolved.status === "ambiguous") {
       const catalog = this.catalogCompact.ambiguous(resolved.query, resolved.options);
-      this.logger.log(
-        `[MANDI] Ambiguous commodity — returning options — ${JSON.stringify(this.summarizeCatalog(catalog))}`,
+      this.logMandi(
+        body,
+        `MANDI ambiguous commodity query=${resolved.query} options=${JSON.stringify(catalog.options ?? [])}`,
       );
       return {
         context: onSearchContext,
@@ -120,33 +122,49 @@ export class MandiService {
 
     if (resolved.status === "not_found") {
       const catalog = this.catalogCompact.notFound(resolved.query);
-      this.logger.log(
-        `[MANDI] Commodity not found — ${JSON.stringify(this.summarizeCatalog(catalog))}`,
-      );
+      this.logMandi(body, `MANDI commodity not found query=${resolved.query}`);
       return {
         context: onSearchContext,
         message: { catalog },
       };
     }
 
-    this.logger.log(
-      `[MANDI] Resolved "${intent.commodityName}" → id=${resolved.commodity.commodity_id}, name="${resolved.commodity.commodity_name}", group="${resolved.commodity.group_name ?? ""}"`,
+    this.logMandi(
+      body,
+      `MANDI commodity resolved commodity_id=${resolved.commodity.commodity_id} name=${resolved.commodity.commodity_name} group=${resolved.commodity.group_name ?? ""}`,
     );
 
     try {
-      const token = await this.agmarknetApi.generateToken();
-      const raw = await this.agmarknetApi.fetchVistaarLocation({
-        commodityId: resolved.commodity.commodity_id,
-        lat: intent.lat,
-        lon: intent.lon,
-        date: intent.date,
-        token,
-      });
+      const logCtx = this.logCtx(body);
+      const token = await this.agmarknetApi.generateToken(logCtx);
+      const raw = await this.agmarknetApi.fetchVistaarLocation(
+        {
+          commodityId: resolved.commodity.commodity_id,
+          lat: intent.lat,
+          lon: intent.lon,
+          date: intent.date,
+          token,
+        },
+        logCtx,
+      );
 
       const catalog = this.catalogCompact.compact(raw, intent, resolved.commodity);
-      this.logger.log(
-        `[MANDI] Returning on_search — ${JSON.stringify(this.summarizeCatalog(catalog))}`,
+      this.logMandi(
+        body,
+        `MANDI returning on_search commodity=${catalog.commodity ?? ""} location=${catalog.location ?? ""} date=${catalog.date ?? ""} price_count=${catalog.prices?.length ?? 0}`,
       );
+      if (catalog.prices?.length) {
+        this.logMandi(
+          body,
+          `MANDI on_search prices: ${JSON.stringify(
+            catalog.prices.map((p) => ({
+              market: p.market,
+              modal: p.modal,
+              unit: p.unit,
+            })),
+          )}`,
+        );
+      }
 
       return {
         context: onSearchContext,
@@ -154,8 +172,9 @@ export class MandiService {
       };
     } catch (err) {
       this.logger.error(
-        `[MANDI] Search failed for commodity="${intent.commodityName}", location="${intent.locationName}" — ${(err as Error).message}`,
+        `MANDI search failed commodity=${intent.commodityName} location=${intent.locationName} error=${(err as Error).message}`,
         (err as any)?.response?.data ?? "",
+        this.logCtx(body),
       );
       throw err;
     }

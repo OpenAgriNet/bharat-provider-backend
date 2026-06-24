@@ -1,6 +1,7 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import axios from "axios";
 import { format } from "date-fns";
+import { LoggerService } from "../logger/logger.service";
 
 export interface VistaarLocationParams {
   commodityId: number;
@@ -12,16 +13,17 @@ export interface VistaarLocationParams {
 
 @Injectable()
 export class AgmarknetApiService {
-  private readonly logger = new Logger(AgmarknetApiService.name);
   private readonly baseUrl = (
     process.env.AGMARKNET_BASE_URL || process.env.MANDI_BASE_URL || "https://api.agmarknet.gov.in"
   ).replace(/\/$/, "");
   private readonly accessName = process.env.AGMARKNET_ACCESS_NAME;
   private readonly password = process.env.AGMARKNET_PASSWORD;
 
-  async generateToken(logLabel = "MANDI"): Promise<string> {
+  constructor(private readonly logger: LoggerService) {}
+
+  async generateToken(logCtx: string): Promise<string> {
     const url = `${this.baseUrl}/v1/generate-dynamic-token-agmarknet`;
-    this.logger.log(`[${logLabel}] Calling Agmarknet generate-dynamic-token`);
+    this.logger.log("MANDI calling Agmarknet generate-dynamic-token", logCtx);
 
     const response = await axios.post(
       url,
@@ -32,15 +34,15 @@ export class AgmarknetApiService {
     if (!token) {
       throw new Error("Agmarknet token response missing token field");
     }
-    this.logger.log(`[${logLabel}] Agmarknet token generated`);
+    this.logger.log("MANDI Agmarknet token generated", logCtx);
     return token;
   }
 
-  async fetchMasterData(option = 2): Promise<any[]> {
-    const logLabel = "MANDI SYNC";
-    const token = await this.generateToken(logLabel);
+  async fetchMasterData(option = 2, trigger = "sync"): Promise<any[]> {
+    const logCtx = `[commoditySync][txn:${trigger}]`;
+    const token = await this.generateToken(logCtx);
     const url = `${this.baseUrl}/v1/fetch-agmarknet-master-data`;
-    this.logger.log(`[${logLabel}] Fetching master data option=${option}`);
+    this.logger.log(`MANDI fetching master data option=${option}`, logCtx);
 
     const response = await axios.get(url, {
       params: { token, option },
@@ -50,13 +52,13 @@ export class AgmarknetApiService {
     if (!Array.isArray(data)) {
       throw new Error(`Master data option=${option} did not return an array`);
     }
-    this.logger.log(`[${logLabel}] Master data fetched — ${data.length} commodities`);
+    this.logger.log(`MANDI master data fetched rows=${data.length}`, logCtx);
     return data;
   }
 
   async fetchVistaarLocation(
     params: VistaarLocationParams,
-    logLabel = "MANDI",
+    logCtx: string,
   ): Promise<any[]> {
     const url = `${this.baseUrl}/v1/fetch-agmarknet-vistaar-location`;
     const query = new URLSearchParams({
@@ -67,12 +69,13 @@ export class AgmarknetApiService {
       long: String(params.lon),
     });
     this.logger.log(
-      `[${logLabel}] Calling vistaar-location — commodity_id=${params.commodityId}, date=${params.date}, lat=${params.lat}, lon=${params.lon}`,
+      `MANDI calling vistaar-location commodity_id=${params.commodityId} date=${params.date} lat=${params.lat} lon=${params.lon}`,
+      logCtx,
     );
 
     const response = await axios.get(`${url}?${query.toString()}`, { timeout: 30000 });
     const records = this.normalizeRecords(response.data);
-    this.logger.log(`[${logLabel}] Vistaar-location returned ${records.length} row(s)`);
+    this.logger.log(`MANDI vistaar-location returned rows=${records.length}`, logCtx);
     return records;
   }
 

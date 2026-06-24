@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { CommodityRow, DatabaseService } from "../weatherforecast/database.service";
 
 export type CommodityResolveResult =
@@ -8,8 +8,6 @@ export type CommodityResolveResult =
 
 @Injectable()
 export class CommodityResolverService {
-  private readonly logger = new Logger(CommodityResolverService.name);
-
   constructor(private readonly databaseService: DatabaseService) {}
 
   async resolve(name: string): Promise<CommodityResolveResult> {
@@ -25,9 +23,6 @@ export class CommodityResolverService {
     const partial = await this.databaseService.findCommoditiesPartial(query, 5);
     if (partial.length === 1) return { status: "resolved", commodity: partial[0] };
     if (partial.length > 1) {
-      this.logger.log(
-        `[MANDI] Ambiguous commodity "${query}" — ${partial.length} matches`,
-      );
       return { status: "ambiguous", query, options: partial.slice(0, 3) };
     }
 
