@@ -135,14 +135,12 @@ export class MandiService {
 
     try {
       const logCtx = this.logCtx(body);
-      const token = await this.agmarknetApi.generateToken(logCtx);
       const raw = await this.agmarknetApi.fetchVistaarLocation(
         {
           commodityId: resolved.commodity.commodity_id,
           lat: intent.lat,
           lon: intent.lon,
           date: intent.date,
-          token,
         },
         logCtx,
       );
