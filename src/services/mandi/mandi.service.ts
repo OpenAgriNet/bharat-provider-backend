@@ -2,6 +2,10 @@ import { Injectable, Logger } from "@nestjs/common";
 import axios from "axios";
 import { format } from "date-fns";
 import { DatabaseService, MandiMasterRow } from "../weatherforecast/database.service";
+import { AgmarknetApiService } from "./agmarknet-api.service";
+import { BecknContextService } from "./beckn-context.service";
+import { CatalogCompactService } from "./catalog-compact.service";
+import { CommodityResolverService } from "./commodity-resolver.service";
 
 export interface AgmarknetVistaarParams {
   statecode: string;
@@ -18,7 +22,97 @@ export class MandiService {
   private readonly baseUrl = process.env.MANDI_BASE_URL;
   private readonly token = process.env.MANDI_TOKEN;
 
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly becknContext: BecknContextService,
+    private readonly commodityResolver: CommodityResolverService,
+    private readonly agmarknetApi: AgmarknetApiService,
+    private readonly catalogCompact: CatalogCompactService,
+  ) {}
+
+  /**
+   * New mandi flow (schemes:vistaar + item.name + gps):
+   * item.descriptor.name (string) + gps → Postgres commodity resolve → vistaar-location → compact catalog.
+   */
+  async mandiLocationSearch(body: {
+    context: any;
+    message?: any;
+  }): Promise<{ context: any; message?: any }> {
+    const onSearchContext = { ...body.context, action: "on_search" };
+
+    const intent = this.becknContext.parseMandiLocationIntent(body);
+    if (!intent) {
+      this.logger.warn(
+        "Mandi v2: missing commodity name or location (gps/lat/lon) in intent",
+      );
+      return {
+        context: onSearchContext,
+        message: {
+          catalog: {
+            status: "invalid_request",
+            message: "commodity name and gps/lat/lon required in intent",
+            prices: [],
+          },
+        },
+      };
+    }
+
+    this.logger.log(
+      `MANDI_V2 commodity="${intent.commodityName}" lat=${intent.lat} lon=${intent.lon} date=${intent.date}`,
+    );
+
+    const resolved = await this.commodityResolver.resolve(intent.commodityName);
+
+    if (resolved.status === "ambiguous") {
+      return {
+        context: onSearchContext,
+        message: { catalog: this.catalogCompact.ambiguous(resolved.query, resolved.options) },
+      };
+    }
+
+    if (resolved.status === "not_found") {
+      return {
+        context: onSearchContext,
+        message: { catalog: this.catalogCompact.notFound(resolved.query) },
+      };
+    }
+
+    try {
+      const token = await this.agmarknetApi.generateToken();
+      const raw = await this.agmarknetApi.fetchVistaarLocation({
+        commodityId: resolved.commodity.commodity_id,
+        lat: intent.lat,
+        lon: intent.lon,
+        date: intent.date,
+        token,
+      });
+
+      const catalog = this.catalogCompact.compact(raw, intent, resolved.commodity);
+      this.logger.log(
+        `MANDI_V2 result commodity_id=${resolved.commodity.commodity_id} rows=${catalog.prices.length}`,
+      );
+
+      return {
+        context: onSearchContext,
+        message: { catalog },
+      };
+    } catch (err) {
+      this.logger.error("Mandi v2 search failed", err);
+      throw err;
+    }
+  }
+
+  /**
+   * Route mandi search: new payload (string commodity + gps) vs legacy (commoditycode + stops).
+   */
+  async mandiSearchRoute(body: { context: any; message?: any }) {
+    // if (this.becknContext.isNewMandiPayload(body)) {
+    //   return this.mandiLocationSearch(body);
+    // }
+    // return this.mandiSearch(body);
+
+    return this.mandiLocationSearch(body);
+  }
 
   /**
    * Get mandi master data from IMD DB by lat/lon (geometry match).

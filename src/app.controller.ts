@@ -114,6 +114,10 @@ export class AppController {
         this.logger.log("Inside Mandi (price-discovery) search");
         return this.appService.mandiSearch(body);
 
+      case "mandi-location":
+        this.logger.log("Inside Mandi v2");
+        return this.appService.mandiLocationSearch(body);
+
       case "pmfby":
         this.logger.log("Inside PMFBY search");
         return await this.appService.handlePmfbySearch(body);
@@ -174,6 +178,7 @@ export class AppController {
     const providerId = gfrProviderId?.toLowerCase();
     const itemDescriptorCode =
       body?.message?.intent?.item?.descriptor?.code?.toLowerCase();
+    const itemDescriptorName = body?.message?.intent?.item?.descriptor?.name;
 
     switch (true) {
       case categoryName === "knowledge-advisory":
@@ -205,7 +210,9 @@ export class AppController {
             return "gfr-crop-registry";
         }
       case categoryCode === "price-discovery":
-        return itemDescriptorCode === "mandi" ? "mandi" : "unknown";
+        if (itemDescriptorCode === "mandi") return "mandi";
+        if (itemDescriptorName) return "mandi-location";
+        return "unknown";
       case gfrProviderId === "sathi-seed":
         return "sathi-seed";
       case providerId === "smam":

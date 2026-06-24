@@ -3447,7 +3447,11 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
   }
 
   async mandiSearch(body: any) {
-    return this.mandiService.mandiSearch(body);
+    return this.mandiService.mandiSearchRoute(body);
+  }
+
+  async mandiLocationSearch(body: any) {
+    return this.mandiService.mandiLocationSearch(body);
   }
 
   async fetchGFRDetails(body: any): Promise<any> {
