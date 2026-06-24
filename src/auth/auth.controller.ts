@@ -25,7 +25,7 @@ export class AuthController {
     @UseGuards(AuthGuard("local"))
     login(@Request() request, @Res() response: Response) {
         this.logger.log('POST /login');
-        console.log("user", request.user)
+        this.logger.log("user", request.user)
         if(request.body.role !== request.user.role) {
             throw new UnauthorizedException
         }

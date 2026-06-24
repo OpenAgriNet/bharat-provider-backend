@@ -1,6 +1,7 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import axios from "axios";
 import * as crypto from "crypto";
+import { LoggerService, appLogger } from '../logger/logger.service';
 
 const GCM_AUTH_TAG_LENGTH = 16;
 const AES_256_KEY_LENGTH = 32;
@@ -92,7 +93,7 @@ function decryptGrievanceResponse(encryptedBase64: string): any {
     decipher.final() as unknown as Uint8Array,
   ]).toString("utf8");
 
-  console.log("PM Kisan Grievance decrypted response string:", decrypted);
+  appLogger.log("PM Kisan Grievance decrypted response string:", decrypted);
 
   try {
     return JSON.parse(decrypted);
@@ -103,7 +104,7 @@ function decryptGrievanceResponse(encryptedBase64: string): any {
 
 @Injectable()
 export class PmkisanGrievanceService {
-  private readonly logger = new Logger(PmkisanGrievanceService.name);
+  constructor(private readonly logger: LoggerService) {}
 
   private getOrderFromBody(body: any): any {
     return body?.message?.order ?? body?.message?.intent?.order;
@@ -136,17 +137,17 @@ export class PmkisanGrievanceService {
     payload: any,
     logPrefix: string,
   ): Promise<any> {
-    console.log("=".repeat(60));
-    console.log(`[PMKISAN GRIEVANCE] ${logPrefix} JSON being encrypted:`);
-    console.log(JSON.stringify(payload, null, 2));
-    console.log("=".repeat(60));
+    this.logger.log("=".repeat(60));
+    this.logger.log(`[PMKISAN GRIEVANCE] ${logPrefix} JSON being encrypted:`);
+    this.logger.log(JSON.stringify(payload, null, 2));
+    this.logger.log("=".repeat(60));
 
     const encryptedText = encryptGrievancePayload(JSON.stringify(payload));
     const requestBody = { EncryptedRequest: encryptedText };
 
-    console.log(`[PMKISAN GRIEVANCE] ${logPrefix} EncryptedRequest body sent to API:`);
-    console.log(JSON.stringify(requestBody, null, 2));
-    console.log("=".repeat(60));
+    this.logger.log(`[PMKISAN GRIEVANCE] ${logPrefix} EncryptedRequest body sent to API:`);
+    this.logger.log(JSON.stringify(requestBody, null, 2));
+    this.logger.log("=".repeat(60));
 
     const url = `${baseUrl}${endpoint}`;
     const response = await axios.request({
@@ -159,9 +160,9 @@ export class PmkisanGrievanceService {
     });
 
     const rawApiResponse = response.data;
-    console.log(`[PMKISAN GRIEVANCE] ${logPrefix} Raw API response:`);
-    console.log(JSON.stringify(rawApiResponse, null, 2));
-    console.log("=".repeat(60));
+    this.logger.log(`[PMKISAN GRIEVANCE] ${logPrefix} Raw API response:`);
+    this.logger.log(JSON.stringify(rawApiResponse, null, 2));
+    this.logger.log("=".repeat(60));
 
     const outputField: string =
       rawApiResponse?.d?.output ?? rawApiResponse?.output ?? rawApiResponse;
@@ -175,14 +176,14 @@ export class PmkisanGrievanceService {
       return { status: "False", Message: outputField };
     }
 
-    console.log(`[PMKISAN GRIEVANCE] ${logPrefix} Encrypted output from API:`);
-    console.log(outputField.trim());
-    console.log("=".repeat(60));
+    this.logger.log(`[PMKISAN GRIEVANCE] ${logPrefix} Encrypted output from API:`);
+    this.logger.log(outputField.trim());
+    this.logger.log("=".repeat(60));
 
     const decryptedOutput = decryptGrievanceResponse(outputField.trim());
-    console.log(`[PMKISAN GRIEVANCE] ${logPrefix} Decrypted output (parsed JSON):`);
-    console.log(JSON.stringify(decryptedOutput, null, 2));
-    console.log("=".repeat(60));
+    this.logger.log(`[PMKISAN GRIEVANCE] ${logPrefix} Decrypted output (parsed JSON):`);
+    this.logger.log(JSON.stringify(decryptedOutput, null, 2));
+    this.logger.log("=".repeat(60));
 
     return decryptedOutput;
   }
@@ -264,7 +265,7 @@ export class PmkisanGrievanceService {
         );
       }
     } catch (error) {
-      console.error(
+      this.logger.error(
         "PM Kisan Grievance Status API call error:",
         error.message,
         error.response?.data ?? "",
@@ -447,7 +448,7 @@ export class PmkisanGrievanceService {
           };
         } else {
           finalIdentityNo = aadhaarToken;
-          console.log("[PMKISAN GRIEVANCE] Aadhaar token received:", aadhaarToken);
+          this.logger.log("[PMKISAN GRIEVANCE] Aadhaar token received:", aadhaarToken);
         }
       }
 
@@ -467,7 +468,7 @@ export class PmkisanGrievanceService {
         );
       }
     } catch (error) {
-      console.error(
+      this.logger.error(
         "PM Kisan Grievance API call error:",
         error.message,
         error.response?.data ?? "",

@@ -23,19 +23,18 @@ import { PmkisanGrievanceService } from "./services/pmkisan-grievance/pmkisan-gr
 import { PmfbyGrievanceService } from "./services/pmfby/pmfby-greviance.service";
 import { SathiService } from "./services/sathi/sathi.service";
 import { SmamService } from "./services/smam/smam.service";
+import { LoggerService } from './services/logger/logger.service';
 
 @Controller("")
 export class AppController {
-  constructor(
-    private readonly appService: AppService,
+  constructor(private readonly appService: AppService,
     private readonly authService: AuthService,
     private readonly httpService: HttpService,
     private readonly gfrService: GfrService,
     private readonly pmkisanGrievanceService: PmkisanGrievanceService,
     private readonly pmfbyGrievanceService: PmfbyGrievanceService,
     private readonly sathiSeedService: SathiService,
-    private readonly smamService: SmamService,
-  ) {}
+    private readonly smamService: SmamService, private readonly logger: LoggerService) {}
 
   @Get()
   getHello(): string {
@@ -45,108 +44,108 @@ export class AppController {
   //dsep
   @Post("dsep/search")
   getContentFromIcar(@Body() body: any) {
-    console.log("search api calling");
+    this.logger.log("search api calling");
     return this.appService.handleSearch(body);
     //return this.appService.getCoursesFromFln(body);
   }
 
   @Post("dsep/select")
   selectCourse(@Body() body: any) {
-    console.log("select api calling");
+    this.logger.log("select api calling");
     return this.appService.handleSelect(body);
   }
 
   @Post("dsep/init")
   initCourse(@Body() body: any) {
-    console.log("init api calling");
+    this.logger.log("init api calling");
     return this.appService.handleInit(body);
   }
 
   @Post("dsep/confirm")
   confirmCourse(@Body() body: any) {
-    console.log("confirm api calling");
+    this.logger.log("confirm api calling");
     return this.appService.handleConfirm(body);
   }
 
   @Post("dsep/rating")
   giveRating(@Body() body: any) {
-    console.log("rating api calling");
+    this.logger.log("rating api calling");
     return this.appService.handleRating(body);
   }
 
   //mobility search endpoint
   @Post("mobility/search")
   async getContentFromIcar1(@Body() body: any) {
-    console.log("search api calling");
+    this.logger.log("search api calling");
 
     const categoryName = body?.message?.intent?.category?.descriptor?.name;
-    console.log("categoryName", categoryName);
+    this.logger.log("categoryName", categoryName);
     const categoryCode =
       body?.message?.intent?.category?.descriptor?.code?.toLowerCase();
-    console.log("categoryCode", categoryCode);
+    this.logger.log("categoryCode", categoryCode);
     const categoryNameLower = categoryName?.toLowerCase();
-    console.log("categoryNameLower", categoryNameLower);
+    this.logger.log("categoryNameLower", categoryNameLower);
 
     const route = this.resolveMobilitySearchRoute(body);
-    console.log("mobilitySearchRoute", route);
+    this.logger.log("mobilitySearchRoute", route);
 
     switch (route) {
       case "knowledge-advisory":
-        console.log("Inside Knowledge Advisory search");
+        this.logger.log("Inside Knowledge Advisory search");
         return this.appService.searchForIntentQuery(body);
 
       case "weather-forecast":
-        console.log("Inside Weather Forecast search");
+        this.logger.log("Inside Weather Forecast search");
         return this.appService.weatherforecastSearch(body);
 
       case "weather-forecast-mausamgram":
-        console.log("Inside Weather Forecast search from mausamgram");
+        this.logger.log("Inside Weather Forecast search from mausamgram");
         return this.appService.masuamGramaWeatherForecastSearch(body);
 
       case "schemes-agri":
-        console.log("Inside schemes-agri search");
+        this.logger.log("Inside schemes-agri search");
         return this.appService.handlePmKisanSearch(body);
 
       case "icar-schemes":
-        console.log("Inside Icar search");
+        this.logger.log("Inside Icar search");
         return this.appService.handleSearch(body);
 
       case "mandi":
-        console.log("Inside Mandi (price-discovery) search");
+        this.logger.log("Inside Mandi (price-discovery) search");
         return this.appService.mandiSearch(body);
 
       case "pmfby":
-        console.log("Inside PMFBY search");
+        this.logger.log("Inside PMFBY search");
         return await this.appService.handlePmfbySearch(body);
 
       case "grievance-agri":
-        console.log("Inside PMKISAN Grievance search");
+        this.logger.log("Inside PMKISAN Grievance search");
         return await this.pmkisanGrievanceService.searchGrievanceStatus(body);
 
       case "gfr-crop-registry": {
-        console.log("INSIDE GFR CROP REGISTRY SEARCH...");
+        this.logger.log("INSIDE GFR CROP REGISTRY SEARCH...");
         return this.gfrService.fetchCropRegistry(body);
       }
 
       case "gfr-crop-recommendation": {
-        console.log("INSIDE GFR CROP RECOMMENDATION SEARCH...");
+        this.logger.log("INSIDE GFR CROP RECOMMENDATION SEARCH...");
         const gfrRecResponse = await this.appService.fetchGFRRecommendation(body);
-        console.log(
+        this.logger.log(
           "GFR recommendation final response-->>",
           JSON.stringify(gfrRecResponse, null, 2),
         );
         return gfrRecResponse;
       }
       case "smam": {
-        console.log("INSIDE SMAM SEARCH...");
+        this.logger.log("INSIDE SMAM SEARCH...");
         const smamResult = await this.smamService.searchSMAMBenfitData(body);
-        console.log("SMAM FINAL RESPONSE:", JSON.stringify(smamResult, null, 2));
+        this.logger.log("SMAM FINAL RESPONSE:", JSON.stringify(smamResult, null, 2));
         return smamResult;
       }
       
       case "sathi-seed": {
         const sathiResult = await this.sathiSeedService.getSeedAvailability(body);
-        console.log("SATHI FINAL RESPONSE:", JSON.stringify(sathiResult, null, 2));
+        this.logger.log("SATHI FINAL RESPONSE:", JSON.stringify(sathiResult, null, 2));
         return sathiResult;
       }
       
@@ -218,36 +217,36 @@ export class AppController {
 
   @Post("mobility/select")
   selectCourse1(@Body() body: any) {
-    console.log("select api calling");
+    this.logger.log("select api calling");
     return this.appService.handleSelect(body);
   }
 
   @Post("mobility/init")
   async initCourse1(@Body() body: any) {
-    console.log("init api calling");
+    this.logger.log("init api calling");
   
     const providerId = body?.message?.order?.provider?.id?.toLowerCase() ?? "";
     const itemId = body?.message?.order?.items?.[0]?.id?.toLowerCase() ?? "";
   
-    console.log(`[init] provider: ${providerId}, item: ${itemId}`);
+    this.logger.log(`[init] provider: ${providerId}, item: ${itemId}`);
   
     switch (providerId) {
       case "pmkisan-greviance":
-        console.log("INSIDE PMKISAN GRIEVANCE INIT...");
+        this.logger.log("INSIDE PMKISAN GRIEVANCE INIT...");
         const grievanceResponse = await this.pmkisanGrievanceService.createGrievance(body);
-        console.log("PM Kisan Grievance Response:", JSON.stringify(grievanceResponse, null, 2));
+        this.logger.log("PM Kisan Grievance Response:", JSON.stringify(grievanceResponse, null, 2));
         return grievanceResponse;
   
       case "pmfby-grievance":
-        console.log("INSIDE PMFBY GRIEVANCE INIT...");
+        this.logger.log("INSIDE PMFBY GRIEVANCE INIT...");
         return this.pmfbyGrievanceService.createGrievance(body);
   
       case "pmfby-agri":
-        console.log("INSIDE PMFBY INIT...");
+        this.logger.log("INSIDE PMFBY INIT...");
         return this.appService.handlePmfbyInit(body);
   
       case "shc-discovery":
-        console.log("INSIDE SHC INIT...");
+        this.logger.log("INSIDE SHC INIT...");
         try {
           const soilHealthCardResponse = await this.appService.fetchAndMapSoilHealthCard(body);
           return await this.appService.handleStatusForSHC(soilHealthCardResponse, body);
@@ -260,7 +259,7 @@ export class AppController {
   
       default:
         if (body?.message?.order) {
-          console.log("INSIDE PMKISAN INIT...");
+          this.logger.log("INSIDE PMKISAN INIT...");
           return this.appService.handlePmkisanInit(body);
         }
         return this.appService.handleInit(body);
@@ -269,19 +268,19 @@ export class AppController {
 
   @Post("mobility/confirm")
   confirmCourse1(@Body() body: any) {
-    console.log("confirm api calling");
+    this.logger.log("confirm api calling");
     return this.appService.handleConfirm(body);
   }
 
   @Post("mobility/rating")
   giveRating1(@Body() body: any) {
-    console.log("rating api calling");
+    this.logger.log("rating api calling");
     return this.appService.handleRating(body);
   }
 
   @Post("mobility/status")
   async handleStatus(@Body() body: any) {
-    console.log("status api calling");
+    this.logger.log("status api calling");
 
     return this.appService.handleStatus(body);
   }
@@ -338,11 +337,11 @@ export class AppController {
     @Param("id") id: string,
     @Request() req: any,
   ) {
-    console.log("description", description);
-    console.log("id", id);
+    this.logger.log("description", description);
+    this.logger.log("id", id);
 
     const referer = req.get("Referer");
-    console.log("Referer", referer);
+    this.logger.log("Referer", referer);
 
     //return this.appService.handleSubmit(description, id);
 

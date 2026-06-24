@@ -15,16 +15,16 @@ import { CreateIcarContentDto } from 'src/dto/createIcarContent.dto';
 @Controller('provider')
 export class ProviderController {
     
-    constructor (private readonly providerService:ProviderService, private readonly logggerService:LoggerService){}
+    constructor(private readonly providerService:ProviderService, private readonly logggerService:LoggerService, private readonly logger: LoggerService) {}
 
     @Post('/content')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("provider"))
     async createContent(@Request() request,@Body() createContentdto?:CreateContentDto){
-        console.log("user", request.user);
-        console.log("createContentdto", createContentdto);
+        this.logger.log("user", request.user);
+        this.logger.log("createContentdto", createContentdto);
         this.logggerService.log('POST /createContent',request.user.id);
         let id = request.user.id
-        console.log("id",id)
+        this.logger.log("id",id)
         return this.providerService.createContent(id,createContentdto)
     }
 
@@ -45,7 +45,7 @@ export class ProviderController {
     @Patch('/content/:id')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("provider"))
     async editContent(@Request() request,@Param('id') id, @Body() createContentdto?:CreateContentDto){
-        console.log("createContentdto", createContentdto);
+        this.logger.log("createContentdto", createContentdto);
         return this.providerService.editContent(id,createContentdto)
     }
 
@@ -54,8 +54,8 @@ export class ProviderController {
     async deleteContent(@Request() request, @Param('id') id){
         this.logggerService.log('POST /deleteContent',request.user.id);
         let provider_id = request.user.id
-        console.log("provider_id",provider_id)
-        console.log("id",id)
+        this.logger.log("provider_id",provider_id)
+        this.logger.log("id",id)
         return this.providerService.deleteContent(id, provider_id)
     }
 
@@ -71,8 +71,8 @@ export class ProviderController {
     async createCollection(@Request() request,@Body() body){
         this.logggerService.log('POST /createContent',request.user.id);
         let provider_id = request.user.id
-        console.log("provider_id",provider_id)
-        console.log("body", body);
+        this.logger.log("provider_id",provider_id)
+        this.logger.log("body", body);
         return this.providerService.createCollection(provider_id, body)
     }
 
@@ -81,7 +81,7 @@ export class ProviderController {
     async getCollection(@Request() request){
         this.logggerService.log('POST /createContent',request.user.id);
         let provider_id = request.user.id
-        console.log("provider_id",provider_id)
+        this.logger.log("provider_id",provider_id)
         return this.providerService.getCollection(provider_id)
     }
 
@@ -90,7 +90,7 @@ export class ProviderController {
     async getCollectionContent(@Request() request, @Param('id') id){
         this.logggerService.log('POST /createContent',request.user.id);
         let provider_id = request.user.id
-        console.log("provider_id",provider_id)
+        this.logger.log("provider_id",provider_id)
         return this.providerService.getCollectionContent(id)
     }
 
@@ -99,9 +99,9 @@ export class ProviderController {
     async updateCollection(@Request() request, @Param('id') id, @Body() body){
         this.logggerService.log('POST /updateCollection',request.user.id);
         let provider_id = request.user.id
-        console.log("provider_id",provider_id)
-        console.log("id",id)
-        console.log("body",body)
+        this.logger.log("provider_id",provider_id)
+        this.logger.log("id",id)
+        this.logger.log("body",body)
         return this.providerService.updateCollection(id, provider_id, body)
     }
 
@@ -110,8 +110,8 @@ export class ProviderController {
     async deleteCollection(@Request() request, @Param('id') id){
         this.logggerService.log('POST /deleteCollection',request.user.id);
         let provider_id = request.user.id
-        console.log("provider_id",provider_id)
-        console.log("id",id)
+        this.logger.log("provider_id",provider_id)
+        this.logger.log("id",id)
         return this.providerService.deleteCollection(id, provider_id)
     }
 
@@ -120,8 +120,8 @@ export class ProviderController {
     async createContentCollection(@Request() request,@Body() body){
         this.logggerService.log('POST /createCollectionContent',request.user.id);
         let provider_id = request.user.id
-        console.log("provider_id",provider_id)
-        console.log("body", body);
+        this.logger.log("provider_id",provider_id)
+        this.logger.log("body", body);
         return this.providerService.createContentCollection(body)
     }
 
@@ -130,8 +130,8 @@ export class ProviderController {
     async deleteContentCollection(@Request() request, @Param('id') id){
         this.logggerService.log('POST /deleteContentCollection',request.user.id);
         let provider_id = request.user.id
-        console.log("provider_id",provider_id)
-        console.log("id",id)
+        this.logger.log("provider_id",provider_id)
+        this.logger.log("id",id)
         return this.providerService.deleteContentCollection(id)
     }
 
@@ -179,8 +179,8 @@ export class ProviderController {
         @Body('document_type') document_type: string,
         
     ) {
-        console.log("upload-file", file)
-        console.log("document_type", document_type)
+        this.logger.log("upload-file", file)
+        this.logger.log("document_type", document_type)
         return await this.providerService.addFile(file, document_type)
     }
 
@@ -189,7 +189,7 @@ export class ProviderController {
     async getFileUrl(
         @Param('id') id: string
     ) {
-        console.log("get-file id", id)
+        this.logger.log("get-file id", id)
         return await this.providerService.getFile(id)
     }
 
@@ -197,8 +197,8 @@ export class ProviderController {
     @Post('/scholarship')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("provider"))
     async createScholarship(@Request() request,@Body() scholarship?:ScholarshipDto){
-        console.log("user", request.user);
-        console.log("scholarship", scholarship);
+        this.logger.log("user", request.user);
+        this.logger.log("scholarship", scholarship);
         this.logggerService.log('POST /scholarship',request.user.id);
         let provider_id = request.user.id
         return this.providerService.createScholarship(provider_id, scholarship)
@@ -207,7 +207,7 @@ export class ProviderController {
     @Get('/scholarship')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("provider"))
     async getScholarship(@Request() request){
-        console.log("user", request.user);
+        this.logger.log("user", request.user);
         this.logggerService.log('POST /scholarship',request.user.id);
         let provider_id = request.user.id
         return this.providerService.getScholarship(provider_id)
@@ -216,7 +216,7 @@ export class ProviderController {
     @Get('/scholarship/:id')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("provider"))
     async getScholarshipById(@Request() request, @Param('id') id){
-        console.log("user", request.user);
+        this.logger.log("user", request.user);
         this.logggerService.log('POST /scholarship',request.user.id);
         let provider_id = request.user.id
         return this.providerService.getScholarshipById(id, provider_id)
@@ -225,7 +225,7 @@ export class ProviderController {
     @Patch('/scholarship/:id')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("provider"))
     async editScholarshipById(@Request() request, @Param('id') id, @Body() scholarship?:ScholarshipDto){
-        console.log("user", request.user);
+        this.logger.log("user", request.user);
         this.logggerService.log('POST /scholarship',request.user.id);
         let provider_id = request.user.id
         return this.providerService.editScholarshipById(id, provider_id, scholarship)
@@ -234,11 +234,11 @@ export class ProviderController {
     @Post('/icarcontent')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("provider"))
     async createIcarConten(@Request() request,@Body() createKvkContentdto?:CreateIcarContentDto){
-        console.log("user", request.user);
-        console.log("createKvkContentdto", createKvkContentdto);
+        this.logger.log("user", request.user);
+        this.logger.log("createKvkContentdto", createKvkContentdto);
         this.logggerService.log('POST /createicarKvkContent',request.user.id);
         let id = request.user.id
-        console.log("id",id)
+        this.logger.log("id",id)
         return this.providerService.createIcarConten(id,createKvkContentdto)
     }
 

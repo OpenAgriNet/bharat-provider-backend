@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { appLogger } from '../logger/logger.service';
 
 @Injectable()
 export class UtilService {
@@ -18,10 +19,10 @@ export class UtilService {
     const randomWord2 = this.generateRandomWord(1);
     // const randomWord3 = this.generateRandomWord(1);
     // const randomWord4 = this.generateRandomWord(1);
-    console.log("randomWord1", randomWord1)
-    console.log("randomWord2", randomWord2)
+    appLogger.log("randomWord1", randomWord1)
+    appLogger.log("randomWord2", randomWord2)
     const referralCode = `${emailPrefix}${randomWord1}${randomWord2}`.toUpperCase();
-    console.log(referralCode);
+    appLogger.log(referralCode);
     return referralCode;
     ;
   }

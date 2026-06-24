@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import { createCipheriv, createDecipheriv } from 'crypto';
+import { appLogger } from '../services/logger/logger.service';
 
 export function getUniqueKey(): string {
   return crypto.randomBytes(16).toString('hex');
@@ -22,7 +23,7 @@ export async function encrypt(text: string, key: string): Promise<string> {
 
     return encrypted;
   } catch (error) {
-    console.error('Encryption error:', error);
+    appLogger.error('Encryption error:', error);
     throw error;
   }
 }
@@ -48,7 +49,7 @@ export async function decrypt(textToDecrypt: string, key: string): Promise<strin
     const decryptedText = decrypted.toString('utf-8').trim();
     return decryptedText;
   } catch (error) {
-    console.error('Decryption error:', error);
+    appLogger.error('Decryption error:', error);
     throw error;
   }
 }
@@ -84,7 +85,7 @@ export async function decryptRequest(encryptedText: string, key: string): Promis
     // Return strict JSON string if we could parse; otherwise return original plaintext
     return parsed ? JSON.stringify(parsed) : plain;
   } catch (error) {
-    console.error('Decrypt request error:', error);
+    appLogger.error('Decrypt request error:', error);
     throw error;
   }
 } 

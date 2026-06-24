@@ -1,15 +1,16 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { HasuraService } from 'src/services/hasura/hasura.service';
 import * as bcrypt from "bcrypt"
+import { LoggerService } from '../services/logger/logger.service';
 
 @Injectable()
 export class SeekerService {
 
-    constructor (private readonly hasuraService:HasuraService){}
+    constructor(private readonly hasuraService:HasuraService, private readonly logger: LoggerService) {}
 
     async resetPassword(email, resetPasswordDto) {
-        console.log("email", email)
-        console.log("resetPasswordDto", resetPasswordDto)
+        this.logger.log("email", email)
+        this.logger.log("resetPasswordDto", resetPasswordDto)
         const user = await this.hasuraService.findOne(email)
         if(user) {
             const passwordMatches = await bcrypt.compare(resetPasswordDto.currentPassword, user.password);

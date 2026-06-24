@@ -3,11 +3,12 @@ import { HasuraService } from '../services/hasura/hasura.service'
 import { CreateContentDto } from 'src/dto/createContent.dto';
 import * as bcrypt from "bcrypt"
 import { S3Service } from 'src/services/s3/s3.service';
+import { LoggerService } from '../services/logger/logger.service';
 
 @Injectable()
 export class ProviderService {
 
-    constructor(private readonly hasuraService: HasuraService, private readonly s3Service: S3Service) { }
+    constructor(private readonly hasuraService: HasuraService, private readonly s3Service: S3Service, private readonly logger: LoggerService) { }
     async createContent(id, createContentdto) {
         return this.hasuraService.createContent(id, createContentdto)
     }
@@ -29,8 +30,8 @@ export class ProviderService {
     }
 
     async resetPassword(email, resetPasswordDto) {
-        console.log("email", email)
-        console.log("resetPasswordDto", resetPasswordDto)
+        this.logger.log("email", email)
+        this.logger.log("resetPasswordDto", resetPasswordDto)
         const user = await this.hasuraService.findOne(email)
         if (user) {
             const passwordMatches = await bcrypt.compare(resetPasswordDto.currentPassword, user.password);
@@ -192,9 +193,9 @@ export class ProviderService {
         const originalName = file.originalname.split(" ").join("").toLowerCase()
         const [name, fileType] = originalName.split(".")
         let key = `${name}${Date.now()}.${fileType}`;
-        console.log("key", key)
+        this.logger.log("key", key)
         const imageUrl = await this.s3Service.uploadFile(file, key);
-        console.log("imageUrl", imageUrl)
+        this.logger.log("imageUrl", imageUrl)
         return {imageUrl: imageUrl, mimetype: `image/${fileType}`, key: key}
         
     }

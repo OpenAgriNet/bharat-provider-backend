@@ -10,7 +10,7 @@ import { SeekerService } from './seeker.service';
 @Controller('seeker')
 export class SeekerController {
 
-    constructor (private readonly seekerService:SeekerService, private readonly logggerService:LoggerService){}
+    constructor(private readonly seekerService:SeekerService, private readonly logggerService:LoggerService, private readonly logger: LoggerService) {}
 
     @Patch('/resetPassword')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("seeker"))
@@ -21,14 +21,14 @@ export class SeekerController {
 
     @Post('/searchContent')
     async getContent(@Request() request,@Body() getContentdto?:CreateContentDto){
-        console.log("getContentdto", getContentdto);
+        this.logger.log("getContentdto", getContentdto);
         this.logggerService.log('POST /getContent');
         return this.seekerService.getContent(getContentdto)
     }
 
     @Post('/searchCollection')
     async searchCollection(@Request() request,@Body() body){
-        console.log("getCollectionDto", body);
+        this.logger.log("getCollectionDto", body);
         this.logggerService.log('POST /getCollection');
         return this.seekerService.searchCollection(body)
     }
@@ -42,28 +42,28 @@ export class SeekerController {
     @Post('/bookmarkContent')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("seeker"))
     async createContentBookmark(@Request() request,@Body() createContentdto?:CreateContentDto){
-        console.log("user", request.user);
-        console.log("createContentdto", createContentdto);
+        this.logger.log("user", request.user);
+        this.logger.log("createContentdto", createContentdto);
         this.logggerService.log('POST /createContent',request.user.id);
         let id = request.user.id
-        console.log("id",id)
+        this.logger.log("id",id)
         return this.seekerService.createContentBookmark(id,createContentdto)
     }
 
     @Delete('/bookmarkContent/:id')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("seeker"))
     async removeBookmarkContent(@Request() request, @Param('id') id){
-        console.log("user", request.user);
+        this.logger.log("user", request.user);
         this.logggerService.log('POST /createContent',request.user.id);
         let seeker_id = request.user.id
-        console.log("id",id)
+        this.logger.log("id",id)
         return this.seekerService.removeBookmarkContent(id, seeker_id)
     }
 
     // @Get('/bookmarkContent')
     // @UseGuards(AuthGuard("jwt"), new RoleGuard("seeker"))
     // async getBookmarkContent(@Request() request){
-    //     console.log("user", request.user);
+    //     this.logger.log("user", request.user);
     //     this.logggerService.log('POST /createContent',request.user.id);
     //     let seeker_id = request.user.id
     //     return this.seekerService.getBookmarkContent(seeker_id)
@@ -86,8 +86,8 @@ export class SeekerController {
     async createBookmark(@Request() request,@Body() body){
         this.logggerService.log('POST /createBookmark',request.user.id);
         let seeker_id = request.user.id
-        console.log("seeker_id",seeker_id)
-        console.log("body", body);
+        this.logger.log("seeker_id",seeker_id)
+        this.logger.log("body", body);
         return this.seekerService.createBookmark(seeker_id, body)
     }
 
@@ -96,7 +96,7 @@ export class SeekerController {
     async getBookmark(@Request() request){
         this.logggerService.log('POST /getBookmark',request.user.id);
         let seeker_id = request.user.id
-        console.log("seeker_id",seeker_id)
+        this.logger.log("seeker_id",seeker_id)
         return this.seekerService.getBookmark(seeker_id)
     }
 
@@ -105,7 +105,7 @@ export class SeekerController {
     async getBookmarkContent(@Request() request, @Param('id') id){
         this.logggerService.log('POST /getBookmarkContent',request.user.id);
         let seeker_id = request.user.id
-        console.log("seeker_id",seeker_id)
+        this.logger.log("seeker_id",seeker_id)
         return this.seekerService.getBookmarkContent(id, seeker_id)
     }
 
@@ -114,9 +114,9 @@ export class SeekerController {
     async updateBookmark(@Request() request, @Param('id') id, @Body() body){
         this.logggerService.log('POST /updateBookmark',request.user.id);
         let seeker_id = request.user.id
-        console.log("seeker_id",seeker_id)
-        console.log("id",id)
-        console.log("body",body)
+        this.logger.log("seeker_id",seeker_id)
+        this.logger.log("id",id)
+        this.logger.log("body",body)
         return this.seekerService.updateBookmark(id, seeker_id, body)
     }
 
@@ -125,8 +125,8 @@ export class SeekerController {
     async deleteCollection(@Request() request, @Param('id') id){
         this.logggerService.log('POST /deleteCollection',request.user.id);
         let seeker_id = request.user.id
-        console.log("seeker_id",seeker_id)
-        console.log("id",id)
+        this.logger.log("seeker_id",seeker_id)
+        this.logger.log("id",id)
         return this.seekerService.deleteBookmark(id, seeker_id)
     }
 
@@ -135,8 +135,8 @@ export class SeekerController {
     async addContentBookmark(@Request() request,@Body() body){
         this.logggerService.log('POST /addContentBookmark',request.user.id);
         let seeker_id = request.user.id
-        console.log("seeker_id",seeker_id)
-        console.log("body", body);
+        this.logger.log("seeker_id",seeker_id)
+        this.logger.log("body", body);
         return this.seekerService.addContentBookmark(body)
     }
 
@@ -145,8 +145,8 @@ export class SeekerController {
     async deleteContentBookmark(@Request() request, @Param('id') id){
         this.logggerService.log('POST /deleteContentBookmark',request.user.id);
         let seeker_id = request.user.id
-        console.log("seeker_id",seeker_id)
-        console.log("id",id)
+        this.logger.log("seeker_id",seeker_id)
+        this.logger.log("id",id)
         return this.seekerService.deleteContentBookmark(id, seeker_id)
     }
 
@@ -154,7 +154,7 @@ export class SeekerController {
     @Post('/configuration')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("seeker"))
     async createConfig(@Request() request,@Body() createSeekerDto:CreateSeekerDto){
-        console.log("user", request.user);
+        this.logger.log("user", request.user);
         this.logggerService.log('POST /createConfig',request.user.id);
         let user_id = request.user.id
         return this.seekerService.createConfig(user_id,createSeekerDto)
@@ -163,7 +163,7 @@ export class SeekerController {
     @Get('/configuration')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("seeker"))
     async getConfig(@Request() request){
-        console.log("user", request.user);
+        this.logger.log("user", request.user);
         this.logggerService.log('POST /createConfig',request.user.id);
         let user_id = request.user.id
         return this.seekerService.getConfig(user_id)

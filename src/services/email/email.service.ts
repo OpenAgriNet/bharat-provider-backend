@@ -24,7 +24,7 @@ export class EmailService {
   ) { }
 
   async sendWelcomeEmail1(email: string): Promise<string> {
-    console.log("email", email)
+    this.logger.log("email", email)
 
     let transporter = nodemailer.createTransport({
       host: this.aws_host,
@@ -52,16 +52,16 @@ export class EmailService {
     }
     try {
       let info = await transporter.sendMail(emailData);
-      console.log("info", info)
+      this.logger.log("info", info)
       if (info.messageId) {
-        console.log("email sent!")
+        this.logger.log("email sent!")
         return "Email sent successfully!"
       } else {
-        console.log("unable to send email")
+        this.logger.log("unable to send email")
         return "unable to send email"
       }
     } catch (error) {
-      console.log("email err", error)
+      this.logger.log("email err", error)
       throw new HttpException('Unable to send Email!', HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
@@ -76,7 +76,7 @@ export class EmailService {
 
   sendEmail1() {
 
-    console.log("Send email function...")
+    this.logger.log("Send email function...")
     const main = async () => {
 
       let transporter = nodemailer.createTransport({
@@ -108,10 +108,10 @@ export class EmailService {
       let info = await transporter.sendMail(emailData);
 
       if (info.messageId) {
-        console.log("email sent!")
+        this.logger.log("email sent!")
         return "Email sent successfully!"
       } else {
-        console.log("unable to send email")
+        this.logger.log("unable to send email")
         return "unable to send email"
       }
 
@@ -119,7 +119,12 @@ export class EmailService {
 
 
     }
-    main().catch(console.error);
+    main().catch((error) =>
+      this.logger.error(
+        "Email send failed",
+        error instanceof Error ? error.stack ?? error.message : String(error),
+      ),
+    );
 
 
   }
@@ -194,7 +199,7 @@ export class EmailService {
   }
 
   // async sendWelcomeEmail2(email: string, name: string) {
-  //   console.log("welcome email 198", email, name)
+  //   this.logger.log("welcome email 198", email, name)
 
   //   let subject = 'Welcome to Medace'
 
@@ -243,13 +248,13 @@ export class EmailService {
   // }
 
   async sendEmail2(email, subject, text) {
-    console.log("email", email)
-    console.log("subject", subject)
-    //console.log("text", text)
+    this.logger.log("email", email)
+    this.logger.log("subject", subject)
+    //this.logger.log("text", text)
 
     const api_key = this.configService.get<string>('MAILGUN_APIKEY')
 
-    console.log("api_key 255", api_key)
+    this.logger.log("api_key 255", api_key)
 
     const mailgun = new Mailgun(formData);
     const mg = mailgun.client({
@@ -265,26 +270,26 @@ export class EmailService {
           subject: subject,
           html: text,
         })
-      console.log("msg 265", msg)
+      this.logger.log("msg 265", msg)
       return msg
     } catch (error) {
-      console.log("error", error)
+      this.logger.log("error", error)
       throw new HttpException(error, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
   }
 
   async sendEmail3(email, subject, text): Promise<any> {
-    console.log("sendEmail3")
-    console.log("email", email)
-    console.log("subject", subject)
-    console.log("text", text)
+    this.logger.log("sendEmail3")
+    this.logger.log("email", email)
+    this.logger.log("subject", subject)
+    this.logger.log("text", text)
 
     const username = 'api'
     const password = this.mailgun_apikey
 
     const base64Credentials = Buffer.from(`${username}:${password}`).toString('base64');
-    console.log("base64Credentials", base64Credentials)
+    this.logger.log("base64Credentials", base64Credentials)
 
 
     let data = new formData();
@@ -305,21 +310,21 @@ export class EmailService {
     };
     try {
       let res = await axios.request(config)
-      console.log("msg", res.data)
+      this.logger.log("msg", res.data)
       return res.data
     } catch (error) {
 
-      console.log("error", error);
+      this.logger.log("error", error);
       throw new HttpException(error, HttpStatus.INTERNAL_SERVER_ERROR);
 
     }
 
     // .then((response) => {
-    //   console.log(JSON.stringify(response.data));
+    //   this.logger.log(JSON.stringify(response.data));
     //   return response.data
     // })
     // .catch((error) => {
-    //   console.log(error);
+    //   this.logger.log(error);
     //   throw new HttpException(error, HttpStatus.INTERNAL_SERVER_ERROR);
     // });
 
@@ -327,7 +332,7 @@ export class EmailService {
   }
 
   async sendEmail(email, subject, text) {
-    console.log("sendEmail 256")
+    this.logger.log("sendEmail 256")
     const axios = require('axios');
     const FormData = require('form-data');
     let data = new FormData();
@@ -349,10 +354,10 @@ export class EmailService {
 
     try {
       let res = await axios.request(config)
-      console.log("msg", res.data)
+      this.logger.log("msg", res.data)
       return res.data
     } catch (error) {
-      console.log("error", error);
+      this.logger.log("error", error);
       throw new HttpException(error, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 

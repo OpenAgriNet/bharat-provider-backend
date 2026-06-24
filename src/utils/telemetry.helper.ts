@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
+import { appLogger } from '../services/logger/logger.service';
 
 /**
  * Telemetry helper for logging network API calls to observability service.
@@ -93,11 +94,11 @@ export async function startTelemetry(
         });
       } catch (innerError) {
         // Silently log telemetry errors without affecting main flow
-        console.error('[Telemetry] Failed to send telemetry:', innerError instanceof Error ? innerError.message : String(innerError));
+        appLogger.error('[Telemetry] Failed to send telemetry:', innerError instanceof Error ? innerError.message : String(innerError));
       }
     }, 0);
   } catch (error) {
     // Catch any errors in telemetry preparation and log them
-    console.error('[Telemetry] Error preparing telemetry:', error instanceof Error ? error.message : String(error));
+    appLogger.error('[Telemetry] Error preparing telemetry:', error instanceof Error ? error.message : String(error));
   }
 }

@@ -1,12 +1,14 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios from "axios";
+import { LoggerService } from '../logger/logger.service';
 
 @Injectable()
 export class PmfbyGrievanceService {
-  private readonly logger = new Logger(PmfbyGrievanceService.name);
-
-  constructor(private readonly configService?: ConfigService) {}
+  constructor(
+    private readonly logger: LoggerService,
+    private readonly configService?: ConfigService,
+  ) {}
 
   private getBaseUrl(): string {
     return (
@@ -67,9 +69,9 @@ export class PmfbyGrievanceService {
   ): Promise<any> {
     try {
       const token = await this.getFGMSToken();
-      console.log("PMFBY grievance token", token);
-      console.log("PMFBY grievance requestorMobileNo", requestorMobileNo);
-      console.log("PMFBY grievance grievanceSupportTicketNo", grievanceSupportTicketNo);
+      this.logger.log("PMFBY grievance token", token);
+      this.logger.log("PMFBY grievance requestorMobileNo", requestorMobileNo);
+      this.logger.log("PMFBY grievance grievanceSupportTicketNo", grievanceSupportTicketNo);
 
 
       const curlCommand = `curl -X POST '${this.getBaseUrl()}/krphapi/FGMS/GetGrievenceTicketsStatus' -H 'Content-Type: application/json' -H 'Authorization: ${token}' -d '${JSON.stringify({

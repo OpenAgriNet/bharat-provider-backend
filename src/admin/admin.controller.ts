@@ -45,7 +45,7 @@ export class AdminController {
     @Patch('/approval/:id')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("admin"))
     async updateapprovalStatus(@Param('id') id, @Body() createUserDto?: CreateUserDto) {
-        console.log("createUserDto", createUserDto)
+        this.logger.log("createUserDto", createUserDto)
         const response = await this.adminService.updateapprovalStatus(id, createUserDto)
         return response;
     }
@@ -53,7 +53,7 @@ export class AdminController {
     @Patch('/enable/:id')
     @UseGuards(AuthGuard("jwt"), new RoleGuard("admin"))
     async updateEnableStatus(@Param('id') id, @Body() createUserDto?: CreateUserDto) {
-        console.log("createUserDto", createUserDto)
+        this.logger.log("createUserDto", createUserDto)
         const response = await this.adminService.updateEnableStatus(id, createUserDto)
         return response;
     }

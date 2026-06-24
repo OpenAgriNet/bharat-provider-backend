@@ -18,19 +18,19 @@ export class AuthService {
     constructor(private readonly jwtService: JwtService,private readonly logger:LoggerService,private readonly hasuraService:HasuraService,private readonly emailService:EmailService) { }
     async validateUser(request){
         let result = await this.hasuraService.isUserApproved(request.email);
-        console.log(result,"result");
+        this.logger.log(result,"result");
         return result;
     }
     async createUser (createUserDto){
         const user = new CreateUserDto();
         user.email=createUserDto.email
         if(createUserDto.role!=="seeker" || (createUserDto.role=="seeker" && createUserDto.password)){
-            console.log("if")
+            this.logger.log("if")
             user.password= await bcrypt.hash(createUserDto.password,10)
         }
         user.name=createUserDto.name
         user.role=createUserDto.role
-        console.log("user", user)
+        this.logger.log("user", user)
         
         const createUser = await this.hasuraService.createUser(user);
 
@@ -81,7 +81,7 @@ export class AuthService {
             seeker.name=createUserDto.name
             seeker.email=createUserDto.email
             seeker.user_id = createUser.id
-            console.log("email",seeker.email)
+            this.logger.log("email",seeker.email)
             const response = await this.hasuraService.createSeekerUser(seeker);
             return response;
         }

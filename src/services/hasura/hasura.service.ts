@@ -126,7 +126,7 @@ export class HasuraService {
 
     try {
       const userResponse = await this.queryDb(userMutation, user);
-      console.log("Admin response", userResponse);
+      this.logger.log("Admin response", userResponse);
       this.logger.log("Admin Created")
       return userResponse.data.insert_User.returning[0];
     } catch (error) {
@@ -169,7 +169,7 @@ export class HasuraService {
     }
     }`;
 
-    console.log(query)
+    this.logger.log(query)
 
     // Rest of your code to execute the query
 
@@ -193,7 +193,7 @@ export class HasuraService {
     }
     }`;
     try {
-      console.log("approval", user.approval)
+      this.logger.log("approval", user.approval)
       const response = await this.queryDb(query, { id: id, approved: user.approved, reason: user.reason })
       return response
     } catch (error) {
@@ -213,7 +213,7 @@ export class HasuraService {
     }
     }`;
     try {
-      console.log("user", user)
+      this.logger.log("user", user)
       const response = await this.queryDb(query, { id: id, enable: user.enable })
       return response
     } catch (error) {
@@ -222,8 +222,8 @@ export class HasuraService {
   }
 
   async updatePassword(id, password) {
-    console.log("id", id)
-    console.log("password", password)
+    this.logger.log("id", id)
+    this.logger.log("password", password)
     const query = `mutation updateApprovalStatus($id: Int!, $password: String) {
       ${this.nameSpace}{update_User_by_pk(pk_columns: { id: $id }, _set: { password: $password}) {
         id
@@ -255,7 +255,7 @@ export class HasuraService {
     try {
       const userResponse = await this.queryDb(query, { email });
       // this.logger.log("User Created")
-      console.log("UserResponse", userResponse)
+      this.logger.log("UserResponse", userResponse)
       return userResponse;
     } catch (error) {
       this.logger.error("User is Not Approved", error);
@@ -266,8 +266,8 @@ export class HasuraService {
   }
 
   async createUser(user) {
-    console.log("user", user)
-    console.log("nameSpace", this.nameSpace)
+    this.logger.log("user", user)
+    this.logger.log("nameSpace", this.nameSpace)
     const userMutation = `
       mutation ($name: String!, $password: String, $role: String!,$email: String!) {
         ${this.nameSpace}{insert_User(objects: { password: $password, role: $role, email: $email,name:$name}) {
@@ -282,7 +282,7 @@ export class HasuraService {
     try {
       var userResponse = await this.queryDb(userMutation, user);
       this.logger.log("User Created")
-      console.log("userResponse", userResponse)
+      this.logger.log("userResponse", userResponse)
       return userResponse.data.icar_.insert_User.returning[0];
     } catch (error) {
 
@@ -292,7 +292,7 @@ export class HasuraService {
   }
 
   async createUserSeeker(user) {
-    console.log(user)
+    this.logger.log(user)
     const userMutation = `
       mutation ($name: String!,$email: String!) {
         ${this.nameSpace}{insert_Seeker_Details(objects: {  email: $email,name:$name}) {
@@ -307,7 +307,7 @@ export class HasuraService {
     try {
       var userResponse = await this.queryDb(userMutation, user);
       this.logger.log("User Created")
-      console.log("userResponse", userResponse)
+      this.logger.log("userResponse", userResponse)
       return userResponse.data.icar_.insert_User.returning[0];
     } catch (error) {
 
@@ -317,7 +317,7 @@ export class HasuraService {
   }
 
   async findOne(email: string): Promise<any> {
-    console.log(email)
+    this.logger.log(email)
     const query = `
       query ($email: String!) {
         ${this.nameSpace}{User(where: {email: {_eq: $email}}) {
@@ -338,7 +338,7 @@ export class HasuraService {
       const response = await this.queryDb(query, {
         email,
       });
-      console.log(response);
+      this.logger.log(response);
       return response.data.icar_.User[0] || null;
     } catch (error) {
       throw new HttpException('Failed to fetch user by username', HttpStatus.NOT_FOUND);
@@ -426,9 +426,9 @@ export class HasuraService {
     `
 
     try {
-      console.log("Response ", createContentdto);
+      this.logger.log("Response ", createContentdto);
       const response = await this.queryDb(query, { user_id: id, ...createContentdto });
-      console.log("response", response);
+      this.logger.log("response", response);
       return response
     } catch (error) {
       throw new HttpException('Failed to create Content', HttpStatus.NOT_FOUND);
@@ -447,9 +447,9 @@ export class HasuraService {
     }
     `
     try {
-      console.log("Response ", createContentdto);
+      this.logger.log("Response ", createContentdto);
       const response = await this.queryDb(query, { seeker_id: id, ...createContentdto });
-      console.log("response", response);
+      this.logger.log("response", response);
       return response
     } catch (error) {
       throw new HttpException('Failed to create Content', HttpStatus.NOT_FOUND);
@@ -458,8 +458,8 @@ export class HasuraService {
   }
 
   async removeBookmarkContent(id, seeker_id) {
-    console.log("id", id)
-    console.log("seeker_id", seeker_id)
+    this.logger.log("id", id)
+    this.logger.log("seeker_id", seeker_id)
     const query = `mutation MyMutation {
       delete_bookmark_content(where: {id: {_eq: ${id}}, seeker_id: {_eq: ${seeker_id}}}) {
         returning {
@@ -469,7 +469,7 @@ export class HasuraService {
     }`
     try {
       const response = await this.queryDb(query);
-      console.log("response", response);
+      this.logger.log("response", response);
       return response
     } catch (error) {
       throw new HttpException('Failed to create Content', HttpStatus.NOT_FOUND);
@@ -597,7 +597,7 @@ export class HasuraService {
   }
 }`
     try {
-      console.log("query", query)
+      this.logger.log("query", query)
       const response = await this.queryDb(query);
       return response;
     } catch (error) {
@@ -607,8 +607,8 @@ export class HasuraService {
   }
 
   async editContent(id, createContentdto) {
-    console.log("id", id)
-    console.log("createContentdto", createContentdto)
+    this.logger.log("id", id)
+    this.logger.log("createContentdto", createContentdto)
 
     const query = `mutation UpdateMyData(
       $id: Int!, 
@@ -677,11 +677,11 @@ export class HasuraService {
       }
     }
     `
-    console.log("query", query)
-    console.log("variables:", { id: id, ...createContentdto });
+    this.logger.log("query", query)
+    this.logger.log("variables:", { id: id, ...createContentdto });
     try {
       const response = await this.queryDb(query, { id: id, ...createContentdto });
-      console.log(response)
+      this.logger.log(response)
       return response;
     } catch (error) {
       throw new HttpException('Failed to Update Profile', HttpStatus.NOT_MODIFIED);
@@ -693,19 +693,19 @@ export class HasuraService {
     let result = 'where: {'
     let order = ''
     Object.entries(getContentdto).forEach(([key, value]) => {
-      console.log(`${key}: ${value}`);
+      this.logger.log(`${key}: ${value}`);
       if (key == 'orderBy') {
-        console.log("554", `${key}: ${value}`);
+        this.logger.log("554", `${key}: ${value}`);
         order = `order_by: {${value}: desc}`
       } else {
-        console.log("557", `${key}: ${value}`);
+        this.logger.log("557", `${key}: ${value}`);
         result += `${key}: {_eq: "${value}"}, `;
       }
 
     });
     result += '}'
-    console.log("result", result)
-    console.log("order", order)
+    this.logger.log("result", result)
+    this.logger.log("order", order)
     const query = `query MyQuery {
       fln_content(${order}, ${result}) {
         id
@@ -748,11 +748,11 @@ export class HasuraService {
   async findContent(searchQuery) {
     // let result = 'where: {'
     // Object.entries(getContentdto).forEach(([key, value]) => {
-    //   console.log(`${key}: ${value}`);
+    //   this.logger.log(`${key}: ${value}`);
     //   result += `${key}: {_eq: "${value}"}, `;
     // });
     // result += '}'
-    // console.log("result", result)
+    // this.logger.log("result", result)
     const query = `query MyQuery {
       fln_content(where: {_or: [{domain: {_iregex: "${searchQuery}"}}, {competency: {_iregex: "${searchQuery}"}}, {contentType: {_iregex: "${searchQuery}"}}, {description: {_iregex: "${searchQuery}"}}, {language: {_iregex: "${searchQuery}"}}, {sourceOrganisation: {_iregex: "${searchQuery}"}}, {title: {_iregex: "${searchQuery}"}}]}, order_by: {createdAt: desc}) {
         id
@@ -795,12 +795,12 @@ export class HasuraService {
   async findScholarshipContent(searchQuery) {
     // let result = 'where: {'
     // Object.entries(getContentdto).forEach(([key, value]) => {
-    //   console.log(`${key}: ${value}`);
+    //   this.logger.log(`${key}: ${value}`);
     //   result += `${key}: {_eq: "${value}"}, `;
     // });
     // result += '}'
-    // console.log("result", result)
-    console.log("searchQuery", searchQuery)
+    // this.logger.log("result", result)
+    this.logger.log("searchQuery", searchQuery)
     const query = `query MyQuery {
       scholarship_content(where: {_or: [{domain: {_iregex: "${searchQuery}"}}, {name: {_iregex: "${searchQuery}"}}, {description: {_iregex: "${searchQuery}"}}, {provider: {_iregex: "${searchQuery}"}}, {creator: {_iregex: "${searchQuery}"}}, {category: {_iregex: "${searchQuery}"}}, {applicationDeadline: {_iregex: "${searchQuery}"}}]}) {
         id
@@ -830,7 +830,7 @@ export class HasuraService {
       }`;
     try {
       const response = await this.queryDb(query);
-      console.log("response", response)
+      this.logger.log("response", response)
       return response;
     } catch (error) {
       this.logger.error("Something Went wrong in creating Admin", error);
@@ -839,8 +839,8 @@ export class HasuraService {
   }
 
   async deleteContent(id, provider_id) {
-    console.log("provider_id", provider_id)
-    console.log("id", id)
+    this.logger.log("provider_id", provider_id)
+    this.logger.log("id", id)
     const contentMutation = `mutation MyMutation { 
       ${this.nameSpace} {delete_Content(where: {id: {_eq: ${id}}, user_id: {_eq: ${provider_id}}}) {
         affected_rows
@@ -861,11 +861,11 @@ export class HasuraService {
   async findCollection(getCollectiondto) {
     let result = 'where: {'
     Object.entries(getCollectiondto).forEach(([key, value]) => {
-      console.log(`${key}: ${value}`);
+      this.logger.log(`${key}: ${value}`);
       result += `${key}: {_eq: "${value}"}, `;
     });
     result += '}'
-    console.log("result", result)
+    this.logger.log("result", result)
     const query = `query MyQuery {
       collection(${result}) {
         id
@@ -895,8 +895,8 @@ export class HasuraService {
   }
 
   async createCollection(provider_id, body) {
-    console.log("provider_id", provider_id)
-    console.log("body", body)
+    this.logger.log("provider_id", provider_id)
+    this.logger.log("body", body)
     const collectionMutation = `
     mutation MyMutation($provider_id:Int,) {
       ${this.nameSpace} {
@@ -941,7 +941,7 @@ export class HasuraService {
     `;
 
     try {
-      console.log(collectionMutation)
+      this.logger.log(collectionMutation)
       return await this.queryDb(collectionMutation);
 
     } catch (error) {
@@ -952,7 +952,7 @@ export class HasuraService {
   }
 
   async getCollection(provider_id) {
-    console.log("provider_id", provider_id)
+    this.logger.log("provider_id", provider_id)
     const collectionMutation = `query MyQuery {
       ${this.nameSpace}{
         ${this.nameSpace}collection(where: {provider_id: {_eq: ${provider_id}}}) {
@@ -988,7 +988,7 @@ export class HasuraService {
   }
 
   async getAllCollection() {
-    console.log("getAllCollection")
+    this.logger.log("getAllCollection")
     const collectionMutation = `query MyQuery {
       ${this.nameSpace}{
         ${this.nameSpace}collection(where: {}) {
@@ -1023,7 +1023,7 @@ export class HasuraService {
   }
 
   async getCollectionContent(id) {
-    console.log("id", id)
+    this.logger.log("id", id)
     const collectionMutation = `query MyQuery {
       collection(where: {id: {_eq: ${id}}}) {
         id
@@ -1133,7 +1133,7 @@ export class HasuraService {
 `;
 
     try {
-      console.log(collectionMutation);
+      this.logger.log(collectionMutation);
 
       return await this.queryDb(collectionMutation, { provider_id, id, updateSet });
 
@@ -1148,8 +1148,8 @@ export class HasuraService {
 
 
   async deleteCollection(id, provider_id) {
-    console.log("provider_id", provider_id)
-    console.log("id", id)
+    this.logger.log("provider_id", provider_id)
+    this.logger.log("id", id)
     const collectionMutation = `mutation MyMutation {
       delete_collection(where: {id: {_eq: ${id}}, provider_id: {_eq: ${provider_id}}}) {
         affected_rows
@@ -1168,7 +1168,7 @@ export class HasuraService {
   }
 
   async createContentCollection(body) {
-    console.log("body", body)
+    this.logger.log("body", body)
     const collectionContentMutation = `mutation MyMutation {
       insert_contents(objects: {collection_id: ${body.collection_id}, content_id: ${body.content_id}}) {
         returning {
@@ -1191,7 +1191,7 @@ export class HasuraService {
   }
 
   async deleteContentCollection(id) {
-    console.log("id", id)
+    this.logger.log("id", id)
     const collectionMutation = `mutation MyMutation {
       delete_contents(where: {id: {_eq: ${id}}}) {
         affected_rows
@@ -1224,10 +1224,10 @@ export class HasuraService {
           },
         }
       );
-      console.log("response.data", response.data)
+      this.logger.log("response.data", response.data)
       return response.data;
     } catch (error) {
-      console.log("error")
+      this.logger.log("error")
       return error;
 
     }
@@ -1254,7 +1254,7 @@ export class HasuraService {
     try {
 
       const response = await this.queryDb(query);
-      console.log("response", response);
+      this.logger.log("response", response);
       return response
     } catch (error) {
       throw new HttpException('Failed to create Content', HttpStatus.NOT_FOUND);
@@ -1264,8 +1264,8 @@ export class HasuraService {
 
   // seeker query
   async createBookmark(seeker_id, body) {
-    console.log("seeker_id", seeker_id)
-    console.log("body", body)
+    this.logger.log("seeker_id", seeker_id)
+    this.logger.log("body", body)
     const query = `mutation MyMutation {
         insert_bookmark(objects: {
           seeker_id: ${seeker_id}, 
@@ -1292,7 +1292,7 @@ export class HasuraService {
   }
 
   async getBookmark(seeker_id) {
-    console.log("provider_id", seeker_id)
+    this.logger.log("provider_id", seeker_id)
     const query = `query MyQuery {
       bookmark(where: {seeker_id: {_eq: ${seeker_id}}}) {
         id
@@ -1315,7 +1315,7 @@ export class HasuraService {
   }
 
   async getBookmarkContent(id, seeker_id) {
-    console.log("id", id)
+    this.logger.log("id", id)
     const query = `query MyQuery {
       bookmark(where: {id: {_eq: ${id}}, seeker_id: {_eq: ${seeker_id}}}) {
         id
@@ -1374,9 +1374,9 @@ export class HasuraService {
   }
 
   async updateBookmark(id, seeker_id, body) {
-    console.log("seeker_id", seeker_id)
-    console.log("id", id)
-    console.log("body", body)
+    this.logger.log("seeker_id", seeker_id)
+    this.logger.log("id", id)
+    this.logger.log("body", body)
     const query = `mutation MyMutation {
       update_bookmark(where: {id: {_eq: ${id}}, seeker_id: {_eq: ${seeker_id}}}, _set: {title: "${body.title}"}) {
         affected_rows
@@ -1402,8 +1402,8 @@ export class HasuraService {
   }
 
   async deleteBookmark(id, seeker_id) {
-    console.log("seeker_id", seeker_id)
-    console.log("id", id)
+    this.logger.log("seeker_id", seeker_id)
+    this.logger.log("id", id)
     const collectionMutation = `mutation MyMutation {
       delete_bookmark(where: {id: {_eq: ${id}}, seeker_id: {_eq: ${seeker_id}}}) {
         affected_rows
@@ -1422,7 +1422,7 @@ export class HasuraService {
   }
 
   async addContentBookmark(body) {
-    console.log("body", body)
+    this.logger.log("body", body)
     const collectionContentMutation = `mutation MyMutation {
       insert_bookmark_content(objects: {bookmark_id: ${body.bookmark_id}, content_id: ${body.content_id}}) {
         returning {
@@ -1445,7 +1445,7 @@ export class HasuraService {
   }
 
   async deleteContentBookmark(id, seeker_id) {
-    console.log("id", id)
+    this.logger.log("id", id)
     const query = `mutation MyMutation {
       delete_bookmark_content(where: {id: {_eq: ${id}}}) {
         affected_rows
@@ -1519,9 +1519,9 @@ export class HasuraService {
     }
     `
     try {
-      console.log("scholarship ", scholarship);
+      this.logger.log("scholarship ", scholarship);
       const response = await this.queryDb(query, { provider_id: provider_id, ...scholarship });
-      console.log("response", response);
+      this.logger.log("response", response);
       return response
     } catch (error) {
       throw new HttpException('Failed to create scholarship', HttpStatus.NOT_FOUND);
@@ -1560,7 +1560,7 @@ export class HasuraService {
     }`
     try {
       const response = await this.queryDb(query)
-      console.log("response", response)
+      this.logger.log("response", response)
       return response;
     } catch (error) {
       throw new HttpException('Unabe to create Seeker configuration', HttpStatus.BAD_REQUEST);
@@ -1598,7 +1598,7 @@ export class HasuraService {
     }`
     try {
       const response = await this.queryDb(query)
-      console.log("response", response)
+      this.logger.log("response", response)
       return response;
     } catch (error) {
       throw new HttpException('Unabe to create Seeker configuration', HttpStatus.BAD_REQUEST);
@@ -1606,8 +1606,8 @@ export class HasuraService {
   }
 
   async editScholarshipById(id, provider_id, scholarship) {
-    console.log("id", id)
-    console.log("provider_id", provider_id)
+    this.logger.log("id", id)
+    this.logger.log("provider_id", provider_id)
     const query = `mutation MyMutation(
       $id: Int!,
       $provider_id: Int,
@@ -1663,9 +1663,9 @@ export class HasuraService {
     }
     }`
     try {
-      console.log("scholarship ", scholarship);
+      this.logger.log("scholarship ", scholarship);
       const response = await this.queryDb(query, { id: id, provider_id: provider_id, ...scholarship });
-      console.log("response", response);
+      this.logger.log("response", response);
       return response
     } catch (error) {
       throw new HttpException('Failed to create scholarship', HttpStatus.NOT_FOUND);
@@ -1676,19 +1676,19 @@ export class HasuraService {
     let result = 'where: {'
     let order = ''
     Object.entries(getContentdto).forEach(([key, value]) => {
-      console.log(`${key}: ${value}`);
+      this.logger.log(`${key}: ${value}`);
       if (key == 'orderBy') {
-        console.log("554", `${key}: ${value}`);
+        this.logger.log("554", `${key}: ${value}`);
         order = `order_by: {${value}: desc}`
       } else {
-        console.log("557", `${key}: ${value}`);
+        this.logger.log("557", `${key}: ${value}`);
         result += `${key}: {_eq: "${value}"}, `;
       }
 
     });
     result += '}'
-    console.log("result", result)
-    console.log("order", order)
+    this.logger.log("result", result)
+    this.logger.log("order", order)
     const query = `query MyQuery {
       scholarship_content(${order}, ${result}) {
         id
@@ -1728,7 +1728,7 @@ export class HasuraService {
   //configuration
 
   async createConfig(user_id, body) {
-    console.log("body", body)
+    this.logger.log("body", body)
     const query = `mutation MyMutation($user_id:Int!,$apiEndPoint:String,$bookmark:String,$displayOrder:json,$filterBy:String,$filters:json,$logo:String,$orderBy:String,$pagination:Int, $positionByLine: Boolean, $positionLogo: Boolean, $positionSiteName: Boolean, $rating: String, $share: String, $siteByLine: String, $siteName: String, $lableTitle: String, $lableAuthor: String, $lableDesc: String, $lableRating: String, $headerColor: String, $headerFontSize: String, $footerText: String) {
       update_Seeker(where: {user_id: {_eq: $user_id}}, _set: {apiEndPoint: $apiEndPoint, bookmark: $bookmark, displayOrder: $displayOrder, filterBy: $filterBy, filters: $filters, logo: $logo, orderBy: $orderBy, pagination: $pagination, positionByLine: $positionByLine, positionLogo: $positionLogo, positionSiteName: $positionSiteName, rating: $rating, share: $share, siteByLine: $siteByLine, siteName: $siteName, lableTitle: $lableTitle, lableAuthor: $lableAuthor, lableDesc: $lableDesc, lableRating: $lableRating, headerColor: $headerColor, headerFontSize: $headerFontSize, footerText: $footerText}) {
         affected_rows
@@ -1741,7 +1741,7 @@ export class HasuraService {
     `
     try {
       const response = await this.queryDb(query, { user_id, ...body })
-      console.log("response", response)
+      this.logger.log("response", response)
       return response;
     } catch (error) {
       throw new HttpException('Unabe to create Seeker configuration', HttpStatus.BAD_REQUEST);
@@ -1783,7 +1783,7 @@ export class HasuraService {
     `
     try {
       const response = await this.queryDb(query)
-      console.log("response", response)
+      this.logger.log("response", response)
       return response;
     } catch (error) {
       throw new HttpException('Unabe to get Seeker configuration', HttpStatus.BAD_REQUEST);
@@ -1802,9 +1802,9 @@ export class HasuraService {
   }
     `
     try {
-      console.log("Response ", createIcarContentdto);
+      this.logger.log("Response ", createIcarContentdto);
       const response = await this.queryDb(query, { user_id: id, ...createIcarContentdto });
-      console.log("response", response);
+      this.logger.log("response", response);
       return response
     } catch (error) {
       throw new HttpException('Failed to create Content', HttpStatus.NOT_FOUND);
@@ -1815,7 +1815,7 @@ export class HasuraService {
 
   async findIcarContent(searchQuery?: string) {
     const isProd = process.env.NODE_ENV === 'prod';
-    console.log("isProd", isProd);
+    this.logger.log("isProd", isProd);
     let contentArgs = '';
     let gqlQuery = '';
     if (!searchQuery) {
@@ -1917,7 +1917,7 @@ export class HasuraService {
       }`;
     }
 
-    console.log("gqlQuery generated=======>>>> ", gqlQuery);
+    this.logger.log("gqlQuery generated=======>>>> ", gqlQuery);
     try {
       const response = await this.queryDb(gqlQuery);
       return response;
@@ -1928,7 +1928,7 @@ export class HasuraService {
   }
 
   async findIcarContentById(itemId) {
-    console.log("searchQuery", itemId)
+    this.logger.log("searchQuery", itemId)
     const query = `query MyQuery {
       ${this.nameSpace} {
         Content(where: {id: {_eq: ${itemId}}}) {
@@ -1983,7 +1983,7 @@ export class HasuraService {
         }
       }
     }`;
-    console.log("query", query)
+    this.logger.log("query", query)
     try {
       const response = await this.queryDb(query);
       return response;
@@ -2152,10 +2152,10 @@ export class HasuraService {
   async getImageUrl(imageId: string): Promise<any> {
     try {
       const url = "http://localhost:3000/provider/getImageUrl/" + imageId;
-      console.log(" image requst from >>", url);
+      this.logger.log(" image requst from >>", url);
       // const header = { headers: { 'Content-Type': 'application/json', 'x-hasura-admin-secret': '#z4X39Q!g1W7fDvX' } };
       const response = await axios.get(url);
-      console.log("response.data", response.data)
+      this.logger.log("response.data", response.data)
       return response.data;
     } catch (error) {
       this.logger.error("Something Went wrong in creating Admin", error);

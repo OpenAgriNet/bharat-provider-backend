@@ -1,12 +1,12 @@
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { LoggerService } from '../logger/logger.service';
 
 @Injectable()
 export class PmfbyService {
-  private readonly logger = new Logger(PmfbyService.name);
-
   constructor(
+    private readonly logger: LoggerService,
     private readonly configService?: ConfigService,
   ) { }
 
@@ -90,7 +90,7 @@ export class PmfbyService {
     try {
       // Static authToken for demo purposes
       const authToken = process.env.PMFBY_AUTH_TOKEN;
-      console.log("authToken--->>", authToken);
+      this.logger.log("authToken--->>", authToken);
       const config = {
         url: `${process.env.PMFBY_BASE_URL}/api/v1/services/services/farmerMobileExists`,
         method: 'get',
@@ -99,9 +99,9 @@ export class PmfbyService {
           authToken: authToken
         }
       }
-      console.log("getFarmerId config--->>", config);
+      this.logger.log("getFarmerId config--->>", config);
       const response = await axios.request(config);
-      console.log("getFarmerId response--->>", response.data);
+      this.logger.log("getFarmerId response--->>", response.data);
       // Fix: Correctly access farmerID from the nested structure
       const farmerId = response?.data?.data?.result?.farmerID;
 
@@ -149,7 +149,7 @@ export class PmfbyService {
     try {
       // Construct the sssyID as per requirements: 040${season}00${year}
       const sssyID = `040${season}00${year}`;
-      console.log('sssyID---> ',sssyID); 
+      this.logger.log('sssyID---> ',sssyID); 
       const config = {
         url: `${process.env.PMFBY_BASE_URL}/api/v1/policy/policy/farmerpolicylist`,
         method: 'get',
@@ -219,9 +219,9 @@ export class PmfbyService {
    */
   async getOtp(mobile: string): Promise<{ success: true; message: string }> {
 
-    console.log("getOtp mobile--->>", mobile);
-    console.log("getOtp baseUrl--->>", this.getBaseUrl());
-    console.log("getOtp headers--->>", await this.buildHeaders());
+    this.logger.log("getOtp mobile--->>", mobile);
+    this.logger.log("getOtp baseUrl--->>", this.getBaseUrl());
+    this.logger.log("getOtp headers--->>", await this.buildHeaders());
 
 
     const timeout = Number(this.configService?.get<number>('PMFBY_TIMEOUT')) || 20000;

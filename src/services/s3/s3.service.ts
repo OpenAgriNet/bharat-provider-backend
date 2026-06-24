@@ -8,13 +8,14 @@ import {
 } from "@aws-sdk/client-s3";
 import { ConfigService } from '@nestjs/config';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { LoggerService } from '../logger/logger.service';
 
 @Injectable()
 export class S3Service {
     private region: string;
     private s3: S3Client;
 
-    constructor(private configService: ConfigService) {
+    constructor(private configService: ConfigService, private readonly logger: LoggerService) {
         this.region = this.configService.get<string>('S3_REGION')
         this.s3 = new S3Client({
             region: this.region,
@@ -26,7 +27,7 @@ export class S3Service {
     }
 
     async uploadFile(file: Express.Multer.File, key: string) {
-        console.log("inside upload file")
+        this.logger.log("inside upload file")
         const bucket = this.configService.get<string>('S3_BUCKET')
         const expiresIn = this.configService.get<number>('EXPIRES_IN')
         const input: PutObjectCommandInput = {
@@ -35,12 +36,12 @@ export class S3Service {
             Key: key,
             ContentType: file.mimetype
         };
-        console.log("input", input)
+        this.logger.log("input", input)
         try {
             const response: PutObjectCommandOutput = await this.s3.send(
                 new PutObjectCommand(input),
             );
-            console.log("response", response)
+            this.logger.log("response", response)
             if (response.$metadata.httpStatusCode === 200) {
                 const client = this.s3;
                 const command = new GetObjectCommand({ Bucket: bucket, Key: key });
@@ -48,12 +49,12 @@ export class S3Service {
             }
             throw new Error('File not saved to s3!')
         } catch (err) {
-            console.log("uploadFile err", err)
+            this.logger.log("uploadFile err", err)
         }
     }
 
     async getFileUrl(key: string) {
-        console.log("inside getFileUrl")
+        this.logger.log("inside getFileUrl")
         const bucket = this.configService.get<string>('S3_BUCKET')
         const expiresIn = this.configService.get<number>('EXPIRES_IN')
         
@@ -63,7 +64,7 @@ export class S3Service {
             return getSignedUrl(client, command, { expiresIn: expiresIn });
             
         } catch (err) {
-            console.log("getFileUrl err", err)
+            this.logger.log("getFileUrl err", err)
         }
     }
 }

@@ -31,9 +31,5 @@ async function bootstrap() {
   // Log after server starts
   logger.log(`🚀 Application is running on: http://localhost:${port}`);
   logger.log(`📡 Server started successfully on port ${port}`);
-  console.log(`\n========================================`);
-  console.log(`🚀 Server is running on port: ${port}`);
-  console.log(`🌐 Access the API at: http://localhost:${port}`);
-  console.log(`========================================\n`);
 }
 bootstrap();

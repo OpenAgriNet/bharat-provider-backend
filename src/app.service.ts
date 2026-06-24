@@ -100,9 +100,9 @@ export class AppService {
     context: components["schemas"]["Context"];
     message: { intent: components["schemas"]["Intent"] };
   }) {
-    console.log("body 98", JSON.stringify(body));
+    this.logger.log("body 98", JSON.stringify(body));
     const intent: any = body.message.intent;
-    console.log("intent: ", intent);
+    this.logger.log("intent: ", intent);
 
     // destructuring the intent
     const provider = intent?.provider?.descriptor?.name;
@@ -110,8 +110,8 @@ export class AppService {
       ? intent.item.descriptor.name
       : "";
     const tagGroup = intent?.item?.tags;
-    console.log("query: ", query);
-    console.log("tag group: ", tagGroup);
+    this.logger.log("query: ", query);
+    this.logger.log("tag group: ", tagGroup);
 
     const flattenedTags: any = {};
     if (tagGroup) {
@@ -119,7 +119,7 @@ export class AppService {
         flattenedTags[tag.name] = tag.value;
       });
     }
-    console.log("flattened tags: ", flattenedTags);
+    this.logger.log("flattened tags: ", flattenedTags);
     const domain = flattenedTags?.domain !== "" ? flattenedTags?.domain : null;
     const theme = flattenedTags?.theme !== "" ? flattenedTags?.theme : null;
     const goal = flattenedTags?.goal !== "" ? flattenedTags?.goal : null;
@@ -150,12 +150,12 @@ export class AppService {
       obj["contentType"] = flattenedTags?.contentType;
     }
 
-    console.log("filter obj", obj);
-    console.log("217", body.context.domain);
+    this.logger.log("filter obj", obj);
+    this.logger.log("217", body.context.domain);
     try {
       const resp = await this.hasuraService.findContent(query);
       const flnResponse: any = resp.data.fln_content;
-      console.log("flnResponse", flnResponse);
+      this.logger.log("flnResponse", flnResponse);
       for (let item of flnResponse) {
         if (item.image) {
           if (!this.isValidUrl(item.image)) {
@@ -173,7 +173,7 @@ export class AppService {
         }
       }
       // const promises = flnResponse.map(async (item) => {
-      //   //console.log("item", item)
+      //   //this.logger.log("item", item)
       //   if (item.image) {
       //     if (this.isValidUrl(item.image)) {
       //       return item
@@ -200,11 +200,11 @@ export class AppService {
           catalog: catalog,
         },
       };
-      // console.log("courseData", courseData)
-      // console.log("courseData 158", JSON.stringify(courseData))
+      // this.logger.log("courseData", courseData)
+      // this.logger.log("courseData 158", JSON.stringify(courseData))
       return courseData;
     } catch (err) {
-      console.log("err: ", err);
+      this.logger.log("err: ", err);
       throw new InternalServerErrorException(err);
     }
   }
@@ -258,9 +258,9 @@ export class AppService {
 
     try {
       const resp = await this.hasuraService.findIcarContent(query);
-      console.log("resp", JSON.stringify(resp.data, null, 2));
+      this.logger.log("resp", JSON.stringify(resp.data, null, 2));
       const icarResponse: any = resp.data.Content;
-      console.log("icarResponse", icarResponse.length);
+      this.logger.log("icarResponse", icarResponse.length);
       const catalog = IcarCatalogGenerator(icarResponse, query);
       body.context.action = "on_search";
       const courseData: any = {
@@ -464,7 +464,7 @@ export class AppService {
 
       return mappedData;
     } catch (error) {
-      console.error("Error making Axios request:", error.message);
+      this.logger.error("Error making Axios request:", error.message);
       throw new Error("Failed to fetch data from the search endpoint");
     }
   }
@@ -557,7 +557,7 @@ export class AppService {
     const itemId = selectDto.message.order.items[0].id;
 
     const courseData = await this.hasuraService.findIcarContentById(itemId);
-    console.log("contentData", courseData.data.Content);
+    this.logger.log("contentData", courseData.data.Content);
 
     delete courseData.data.Content[0].url;
 
@@ -618,7 +618,7 @@ export class AppService {
 
     // const OrderDetails = await this.hasuraService.GetOrderId(itemId, id)
     // const orderId = OrderDetails.data[`${this.nameSpace}`].Order[0].order_id
-    // console.log("orderId", orderId)
+    // this.logger.log("orderId", orderId)
 
     const courseData = await this.hasuraService.findIcarContentById(itemId);
     const order: any = selectItemMapper(courseData.data.Content[0]);
@@ -725,14 +725,14 @@ export class AppService {
           )
           .pipe(map((item) => item.data)),
       );
-      console.log("res in test api update: ", res.data);
+      this.logger.log("res in test api update: ", res.data);
 
       confirmDto.message.order = order;
       confirmDto.context.action = "on_confirm";
-      console.log("action: ", confirmDto.context.action);
+      this.logger.log("action: ", confirmDto.context.action);
       return confirmDto;
     } catch (err) {
-      console.log("err: ", err);
+      this.logger.log("err: ", err);
       throw new InternalServerErrorException(err);
     }
   }
@@ -764,47 +764,48 @@ export class AppService {
     return resp;
   }
 
-  async sendOTP(mobileNumber: string, type: string): Promise<any> {
+  async sendOTP(
+    mobileNumber: string,
+    type: string,
+    transactionId?: string,
+  ): Promise<any> {
+    const logCtx = `[sendOTP][txn:${transactionId ?? "unknown"}]`;
+
     try {
       // Auto-detect the type if not provided
       let detectedType = type;
-      this.logger.log("PMKISAN detectedType: ", detectedType);
-      this.logger.log("PMKISAN mobileNumber: ", mobileNumber);
-      // if (detectedType=="") {
       if (/^[6-9]\d{9}$/.test(mobileNumber)) {
         detectedType = "Mobile";
-        // } else if (mobileNumber.length == 14 && /^[6-9]\d{9}$/.test(mobileNumber.substring(0, 10))) {
-        //   detectedType = "MobileAadhar";
       } else if (mobileNumber.length == 12 && /^\d+$/.test(mobileNumber)) {
         detectedType = "Aadhar";
       } else if (mobileNumber.length == 11) {
         detectedType = "Ben_id";
       } else {
-        // Default to Ben_id if format doesn't match any known pattern
         detectedType = "Ben_id";
       }
-      // }
+
+      this.logger.log(
+        `PMKISAN detectedType=${detectedType} mobileNumber=${mobileNumber}`,
+        logCtx,
+      );
 
       let key = getUniqueKey();
-      // Create the request data as a JSON string
       let requestData = JSON.stringify({
         Types: detectedType,
         Values: mobileNumber,
         Token: process.env.PM_KISSAN_TOKEN,
       });
 
-      console.log("PMKISAN Request data: ", requestData);
+      this.logger.log(`PMKISAN request data: ${requestData}`, logCtx);
 
-      // Encrypt the request data
       let encrypted_text = await encrypt(requestData, key);
-      console.log("PMKISAN encrypted text without @: ", encrypted_text);
+      this.logger.log("PMKISAN encrypted request payload prepared", logCtx);
 
-      // Format the request data as expected by PM Kisan service
       let data = {
         EncryptedRequest: encrypted_text + "@" + key,
       };
 
-      console.log("PMKISAN (in sendOTP)the data in the data var is as: ", data);
+      this.logger.log("PMKISAN sending ChatbotOTP request", logCtx);
 
       let config = {
         method: "post",
@@ -814,22 +815,23 @@ export class AppService {
           "Content-Type": "application/json",
         },
         data: data,
-        timeout: 60000, // 1 minute timeout
+        timeout: 60000,
       };
-      console.log("PMKISAN config: ", config);
       let response: any = await axios.request(config);
-      console.log("PMKISAN sendOTP response status: ", response.status);
+      this.logger.log(
+        `PMKISAN sendOTP response status=${response.status}`,
+        logCtx,
+      );
 
       if (response.status >= 200 && response.status < 300) {
         response = await response.data;
 
-        // Extract the encrypted response and key
         const [encryptedResponse, responseKey] = (
           response.d.output || ""
         ).split("@");
 
         if (!encryptedResponse) {
-          console.error("PMKISAN No encrypted response received");
+          this.logger.error("PMKISAN no encrypted response received", logCtx);
           return {
             d: {
               output: {
@@ -840,25 +842,39 @@ export class AppService {
           };
         }
 
-        // Use the response key for decryption
         let decryptedData: any = await decryptRequest(
           encryptedResponse,
           responseKey || key,
         );
-        console.log("PMKISAN Response from decryptedData(sendOTP)", decryptedData);
+        this.logger.log(
+          `PMKISAN decrypted sendOTP response: ${decryptedData}`,
+          logCtx,
+        );
 
         try {
           const parsedData = JSON.parse(decryptedData);
           response.d.output = parsedData;
           response["status"] =
             response.d.output.Rsponce !== "False" ? "OK" : "NOT_OK";
+          this.logger.log(
+            `PMKISAN sendOTP result status=${response["status"]}`,
+            logCtx,
+          );
         } catch (e) {
-          console.error("PMKISAN Error parsing decrypted data:", e);
+          this.logger.error(
+            "PMKISAN error parsing decrypted sendOTP response",
+            e,
+            logCtx,
+          );
           response["status"] = "NOT_OK";
         }
 
         return response;
       } else {
+        this.logger.warn(
+          `PMKISAN sendOTP non-success HTTP status=${response.status}`,
+          logCtx,
+        );
         return {
           d: {
             output: {
@@ -869,11 +885,7 @@ export class AppService {
         };
       }
     } catch (error) {
-      console.error(
-        "PMKISAN Error in sendOTP:",
-        error.message,
-        error.response?.data || error,
-      );
+      this.logger.error("PMKISAN sendOTP failed", error, logCtx);
 
       /*
       // Check for network-related errors
@@ -885,7 +897,7 @@ export class AppService {
           error.message.includes('timeout') ||
           error.message.includes('connect') ||
           error.message.includes('ENOTFOUND')) {
-        console.log("PMKISAN Network connectivity issue detected - not sending OTP");
+        this.logger.log("PMKISAN Network connectivity issue detected - not sending OTP");
         return {
           d: {
             output: {
@@ -969,7 +981,7 @@ export class AppService {
       };
 
       let response: any = await axios.request(config);
-      // console.log("verifyOTP", response.status);
+      // this.logger.log("verifyOTP", response.status);
       if (response.status >= 200 && response.status < 300) {
         response = await response.data;
         let decryptedData: any = await decryptRequest(response.d.output, key);
@@ -1156,7 +1168,7 @@ export class AppService {
       .map((data: any, index: number) => {
         // Validate data object
         if (!data) {
-          console.warn(
+          this.logger.warn(
             `Skipping invalid item at index ${index}: data is null or undefined`,
           );
           return null;
@@ -1190,7 +1202,7 @@ export class AppService {
               current[key] === undefined ||
               current[key] === null
             ) {
-              console.warn(
+              this.logger.warn(
                 `${field.message} for item ${
                   data.id || data.computedID || "unknown"
                 } at index ${index}`,
@@ -1216,7 +1228,7 @@ export class AppService {
         const parameterTags = data.reportData.parameterInfos
           .map((param: any) => {
             if (!param || !param.key || param.value === undefined) {
-              console.warn(
+              this.logger.warn(
                 `Invalid parameter for item ${
                   data.id || data.computedID || "unknown"
                 }: missing key or value`,
@@ -1258,7 +1270,7 @@ export class AppService {
         )
           .map((rec: any, recIndex: number) => {
             if (!rec || !rec.crop) {
-              console.warn(
+              this.logger.warn(
                 `Skipping invalid fertilizer recommendation at index ${recIndex} for item ${
                   data.id || data.computedID || "unknown"
                 }: missing or invalid crop`,
@@ -1275,7 +1287,7 @@ export class AppService {
                     !fert.fertilizer.name ||
                     !fert.bags
                   ) {
-                    console.warn(
+                    this.logger.warn(
                       `Skipping invalid fertilizer at index ${fertIndex} for crop ${
                         rec.crop
                       } in item ${data.id || data.computedID || "unknown"}`,
@@ -1326,7 +1338,7 @@ export class AppService {
         const deficiencyTags = (data.rdfValues.deficiency || [])
           .map((def: any, index: number) => {
             if (!def) {
-              console.warn(
+              this.logger.warn(
                 `Skipping invalid deficiency at index ${index} for item ${
                   data.id || data.computedID || "unknown"
                 }`,
@@ -1533,7 +1545,7 @@ export class AppService {
       });
 
       accessToken = tokenResponse.data?.data?.generateAccessToken?.token;
-      console.log("accessToken--->>", accessToken);
+      this.logger.log("accessToken--->>", accessToken);
       if (!accessToken) {
         throw new Error("Failed to retrieve access token");
       }
@@ -1569,11 +1581,11 @@ export class AppService {
       },
     };
 
-    console.log(
+    this.logger.log(
       "soilHealthPayload-->>",
       JSON.stringify(soilHealthPayload, null, 2),
     );
-    console.log("baseUrl----> ", baseUrl);
+    this.logger.log("baseUrl----> ", baseUrl);
     try {
       const soilHealthResponse = await axios.post(baseUrl, soilHealthPayload, {
         headers: {
@@ -1581,7 +1593,7 @@ export class AppService {
           Authorization: `Bearer ${accessToken}`,
         },
       });
-      console.log("api response ----> ", soilHealthResponse.data);
+      this.logger.log("api response ----> ", soilHealthResponse.data);
       const soilHealthData = soilHealthResponse.data;
       if (!soilHealthData?.data?.getTestForAuthUser) {
         throw new Error("No soil health data found");
@@ -1589,7 +1601,7 @@ export class AppService {
 
       return soilHealthData;
     } catch (error) {
-      console.error(
+      this.logger.error(
         "Soil health API error:",
         error.response?.data || error.message,
       );
@@ -1648,7 +1660,7 @@ export class AppService {
       }
 
       this.logger.log("OTP validation successful", logCtx);
-      // console.log("✅ OTP IS SKIPPED!");
+      // this.logger.log("✅ OTP IS SKIPPED!");
       // Clear OTP after successful validation
       // this.clearTempOTPStore();
 
@@ -1875,7 +1887,7 @@ export class AppService {
       };
     } catch (err: any) {
       const msg = err?.message ?? "PMFBY request failed";
-      console.error("❌ handlePmfbyStatus error:", err);
+      this.logger.error("❌ handlePmfbyStatus error:", err);
       return this.createStatusErrorResponse(body.context, "pmfby_error", msg);
     }
   }
@@ -2192,14 +2204,14 @@ export class AppService {
   }
 
   async handleSubmit(description, id) {
-    console.log("description", description);
-    console.log("id", id);
+    this.logger.log("description", description);
+    this.logger.log("id", id);
     try {
       const courseData = await this.hasuraService.SubmitFeedback(
         description,
         id,
       );
-      console.log("courseData", courseData);
+      this.logger.log("courseData", courseData);
       return { message: "feedback submitted Successfully" };
     } catch (error) {
       return error;
@@ -2290,7 +2302,7 @@ export class AppService {
         searchQuery = ""; // or handle case where no filters are applied
       }
 
-      console.log("Scheme search query generated=======>>>> ", JSON.stringify(searchQuery, null, 2));
+      this.logger.log("Scheme search query generated=======>>>> ", JSON.stringify(searchQuery, null, 2));
       const resp = await this.hasuraService.findIcarContent(searchQuery);
 
       // const icarResponse: any = resp.data.icar_.Content;
@@ -2298,7 +2310,7 @@ export class AppService {
         process.env.NODE_ENV === "dev"
           ? resp.data.icar_.Content
           : resp.data.Content;
-      // console.log("icarResponse=======>>>> ", JSON.stringify(icarResponse, null, 2));
+      // this.logger.log("icarResponse=======>>>> ", JSON.stringify(icarResponse, null, 2));
       for (let item of icarResponse) {
         if (item.icon) {
           if (!this.isValidUrl(item.icon)) {
@@ -2348,7 +2360,11 @@ export class AppService {
 
     try {
       // Generate and store OTP using registration number
-      const otpResponse = await this.sendOTP(registrationNumber, "");
+      const otpResponse = await this.sendOTP(
+        registrationNumber,
+        "",
+        body?.context?.transaction_id,
+      );
 
       if (otpResponse.status === "OK") {
         // Store registration number for later OTP verification : comment for now implement OTP later
@@ -2402,7 +2418,7 @@ export class AppService {
         );
       }
     } catch (error) {
-      console.log("PMKISAN STATUS ERROR ORDER_STATUS", error);
+      this.logger.log("PMKISAN STATUS ERROR ORDER_STATUS", error);
       return this.createErrorResponse(
         body.context,
         "processing_error",
@@ -2533,10 +2549,10 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
     let res: any;
     try {
       const requestData = `{\"Types\":\"${type}\",\"Values\":\"${mobileNumber}\",\"Token\":\"${process.env.PM_KISSAN_TOKEN}\"}`;
-      console.log("Request data: ", requestData);
+      this.logger.log("Request data: ", requestData);
       let key = getUniqueKey();
       let encrypted_text = await encrypt(requestData, key);
-      console.log("encrypted text without @: ", encrypted_text);
+      this.logger.log("encrypted text without @: ", encrypted_text);
 
       let data = {
         EncryptedRequest: `${encrypted_text}@${key}`,
@@ -2553,25 +2569,25 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         timeout: 60000, // 10 second timeout
       };
 
-      console.log("getUserData config:", config);
+      this.logger.log("getUserData config:", config);
       res = await axios.request(config);
-      this.logger.log("getUserData response status:", res.status);
+      this.logger.log(`getUserData response status=${res.status}`);
 
       if (res.status >= 200 && res.status < 300) {
         res = await res.data;
-        console.log("getUserData raw response:", res);
+        this.logger.log("getUserData raw response:", res);
 
         if (res.d && res.d.output) {
           let decryptedData: any = await decryptRequest(res.d.output, key);
-          console.log("Response of getUserData", res);
-          console.log("decrypted data(from getUserData): ", decryptedData);
+          this.logger.log("Response of getUserData", res);
+          this.logger.log("decrypted data(from getUserData): ", decryptedData);
 
           try {
             res.d.output = JSON.parse(decryptedData);
 
             res["status"] = res.d.output.Rsponce != "False" ? "OK" : "NOT_OK";
           } catch (parseError) {
-            console.error("Error parsing decrypted data:", parseError);
+            this.logger.error("Error parsing decrypted data:", parseError);
             res.d.output = {
               Rsponce: "False",
               Message: "Error parsing response",
@@ -2579,7 +2595,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
             res["status"] = "NOT_OK";
           }
         } else {
-          console.error("Invalid response structure:", res);
+          this.logger.error("Invalid response structure:", res);
           res = {
             d: {
               output: {
@@ -2591,7 +2607,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
           };
         }
       } else {
-        console.error("getUserData HTTP error:", res.status);
+        this.logger.error("getUserData HTTP error:", res.status);
         res = {
           d: {
             output: {
@@ -2603,7 +2619,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         };
       }
     } catch (error) {
-      console.error("getUserData error:", error.message);
+      this.logger.error("getUserData error:", error.message);
       res = {
         d: {
           output: {
@@ -2618,8 +2634,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
   }
 
   async fetchUserData(context: any, event: any): Promise<string> {
-    this.logger.log("Fetch user data");
-    this.logger.log("Current queryType:", context.queryType);
+    this.logger.log(`Fetch user data | queryType=${context.queryType}`);
     const userIdentifier = `${context.userAadhaarNumber}${context.lastAadhaarDigits}`;
     let res;
     let type = "Ben_id";
@@ -2671,8 +2686,9 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       res.d.output["eKYC_Status"],
     );
 
-    this.logger.log("ChatbotBeneficiaryStatus");
-    this.logger.log("using...", userIdentifier, type);
+    this.logger.log(
+      `ChatbotBeneficiaryStatus | userIdentifier=${userIdentifier} type=${type}`,
+    );
     let userErrors = [];
 
     try {
@@ -2694,19 +2710,19 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         data: data,
       };
 
-      this.logger.log("In fetchUserData:", JSON.stringify(config));
+      this.logger.log(`In fetchUserData config=${JSON.stringify(config)}`);
       let errors: any = await axios.request(config);
       errors = await errors.data;
-      this.logger.log("related issues", JSON.stringify(errors));
+      this.logger.log(`related issues=${JSON.stringify(errors)}`);
 
       let decryptedData: any = await decryptRequest(errors.d.output, token);
 
       // Parse the decrypted data to get the actual API response
       try {
         errors = JSON.parse(decryptedData);
-        this.logger.log("Decrypted API response:", JSON.stringify(errors));
+        this.logger.log(`Decrypted API response=${JSON.stringify(errors)}`);
       } catch (parseError) {
-        this.logger.error("Error parsing decrypted data:", parseError);
+        this.logger.error("Error parsing decrypted data", parseError);
         // Fallback to original response if parsing fails
         errors = {
           Rsponce: "False",
@@ -2714,7 +2730,9 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         };
       }
 
-      this.logger.log("Response from FetchUserdata: ", JSON.stringify(errors));
+      this.logger.log(
+        `Response from FetchUserdata=${JSON.stringify(errors)}`,
+      );
 
       if (errors.Rsponce == "True") {
         const queryType =
@@ -2920,7 +2938,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
     context: components["schemas"]["Context"];
     message: { intent: components["schemas"]["Intent"] };
   }) {
-    console.log("Weather forecast search initiated");
+    this.logger.log("Weather forecast search initiated");
     return this.weatherForecastService.weatherforecastSearch(body);
   }
 
@@ -2928,7 +2946,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
     context: components["schemas"]["Context"];
     message: { intent: components["schemas"]["Intent"] };
   }) {
-    console.log("Mausamgram Weather forecast search initiated");
+    this.logger.log("Mausamgram Weather forecast search initiated");
     return this.weatherForecastService.mausamgramWeatherforecastSearch(body);
   }
 
@@ -2937,7 +2955,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
    * Supports both search payload (message.fulfillments) and order-style (message.order.fulfillments).
    */
   async handlePmfbySearch(body: any) {
-    console.log("[PMFBY Search] Step 0: Request received", {
+    this.logger.log("[PMFBY Search] Step 0: Request received", {
       transaction_id: body?.context?.transaction_id,
       message_id: body?.context?.message_id,
     });
@@ -3004,7 +3022,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       },
     });
 
-    console.log(
+    this.logger.log(
       "[PMFBY Search] Step 1: Checking OTP verification for transaction_id",
       transactionId,
     );
@@ -3012,7 +3030,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       const transactionMismatchMessage = !transactionId
         ? "Transaction ID is missing. Include context.transaction_id in the request."
         : `Transaction ID "${transactionId}" does not match a verified session. Complete get_otp via init, then verify OTP and get status via POST /mobility/status using the same transaction_id.`;
-      console.log("[PMFBY Search] Step 1 FAILED: Transaction not verified", {
+      this.logger.log("[PMFBY Search] Step 1 FAILED: Transaction not verified", {
         transaction_id: transactionId,
         has_transaction_id: !!transactionId,
         is_verified: transactionId
@@ -3025,11 +3043,11 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         transactionMismatchMessage,
       );
     }
-    console.log("[PMFBY Search] Step 1 OK: Transaction verified");
+    this.logger.log("[PMFBY Search] Step 1 OK: Transaction verified");
 
     const bodyKeys = body && typeof body === "object" ? Object.keys(body) : [];
     const unwrapped = body?.request ?? body?.payload ?? body;
-    console.log("[PMFBY Search] Step 2: Body shape", {
+    this.logger.log("[PMFBY Search] Step 2: Body shape", {
       top_level_keys: bodyKeys,
       has_fulfillments_root:
         Array.isArray(unwrapped?.fulfillments) &&
@@ -3063,7 +3081,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
     const mobileNumber =
       fulfillment?.customer?.contact?.phone ?? fulfillment?.contact?.phone;
 
-    console.log("[PMFBY Search] Step 2: Parsed fulfillment and tags", {
+    this.logger.log("[PMFBY Search] Step 2: Parsed fulfillment and tags", {
       fulfillment_source: fulfillment
         ? unwrapped?.fulfillments?.[0] === fulfillment
           ? "fulfillments[0]"
@@ -3082,7 +3100,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
     });
 
     if (!inquiryType || !season || !year) {
-      console.log("[PMFBY Search] Step 2 FAILED: Missing required fields", {
+      this.logger.log("[PMFBY Search] Step 2 FAILED: Missing required fields", {
         has_inquiryType: !!inquiryType,
         has_season: !!season,
         has_year: !!year,
@@ -3093,26 +3111,26 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         `${!inquiryType ? "inquiryType" : !season ? "season" : "year"} is required for PMFBY service`,
       );
     }
-    console.log("[PMFBY Search] Step 2 OK: All required fields present");
+    this.logger.log("[PMFBY Search] Step 2 OK: All required fields present");
 
-    console.log("[PMFBY Search] Step 3: Fetching farmer ID for mobile");
+    this.logger.log("[PMFBY Search] Step 3: Fetching farmer ID for mobile");
     const farmerId = await this.pmfbyService.getFarmerId(mobileNumber);
-    console.log("[PMFBY Search] Step 3: Farmer ID result", {
+    this.logger.log("[PMFBY Search] Step 3: Farmer ID result", {
       farmerId: farmerId || "(not found)",
     });
     if (!farmerId) {
-      console.log("[PMFBY Search] Step 3 FAILED: Farmer ID not found");
+      this.logger.log("[PMFBY Search] Step 3 FAILED: Farmer ID not found");
       return buildSearchError(
         "farmer_id_not_found",
         "Error",
         "Farmer ID not found for the provided mobile number",
       );
     }
-    console.log("[PMFBY Search] Step 3 OK: Farmer ID resolved");
+    this.logger.log("[PMFBY Search] Step 3 OK: Farmer ID resolved");
 
-    console.log("[PMFBY Search] Step 4: Getting PMFBY auth token");
+    this.logger.log("[PMFBY Search] Step 4: Getting PMFBY auth token");
     const pmfbyToken = await this.pmfbyService.getPmfbyToken();
-    console.log("[PMFBY Search] Step 4 OK: Token acquired", {
+    this.logger.log("[PMFBY Search] Step 4 OK: Token acquired", {
       token_preview: pmfbyToken ? `${pmfbyToken.slice(0, 8)}...` : "(none)",
     });
 
@@ -3125,7 +3143,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
           : String(season).toLowerCase() === "summer"
             ? "3"
             : "";
-    console.log("[PMFBY Search] Step 5: Resolved season/year", {
+    this.logger.log("[PMFBY Search] Step 5: Resolved season/year", {
       seasonCode,
       formattedYear,
       inquiryType,
@@ -3134,7 +3152,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
     let mappedResponse;
     try {
       if (String(inquiryType).toLowerCase() === "policy_status") {
-        console.log("[PMFBY Search] Step 6: Fetching policy status", {
+        this.logger.log("[PMFBY Search] Step 6: Fetching policy status", {
           farmerId,
           seasonCode,
           formattedYear,
@@ -3149,9 +3167,9 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
           response?.data ?? response,
           "Policies",
         );
-        console.log("[PMFBY Search] Step 6 OK: Policy data mapped");
+        this.logger.log("[PMFBY Search] Step 6 OK: Policy data mapped");
       } else if (String(inquiryType).toLowerCase() === "claim_status") {
-        console.log("[PMFBY Search] Step 6: Fetching claim status", {
+        this.logger.log("[PMFBY Search] Step 6: Fetching claim status", {
           farmerId,
           seasonCode,
           year,
@@ -3166,9 +3184,9 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
           response?.data ?? response,
           "Claims",
         );
-        console.log("[PMFBY Search] Step 6 OK: Claim data mapped");
+        this.logger.log("[PMFBY Search] Step 6 OK: Claim data mapped");
       } else {
-        console.log("[PMFBY Search] Step 6 FAILED: Invalid inquiry_type", {
+        this.logger.log("[PMFBY Search] Step 6 FAILED: Invalid inquiry_type", {
           inquiryType,
         });
         return buildSearchError(
@@ -3178,7 +3196,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         );
       }
     } catch (err: any) {
-      console.log("[PMFBY Search] Step 6 FAILED: PMFBY API error", {
+      this.logger.log("[PMFBY Search] Step 6 FAILED: PMFBY API error", {
         message: err?.message,
         stack: err?.stack?.split("\n")?.[0],
       });
@@ -3189,7 +3207,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       );
     }
 
-    console.log("[PMFBY Search] Step 7: Returning on_search catalog success");
+    this.logger.log("[PMFBY Search] Step 7: Returning on_search catalog success");
     return {
       context: baseSearchContext(),
       message: { catalog: mappedResponse },
@@ -3433,7 +3451,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
   }
 
   async fetchGFRDetails(body: any): Promise<any> {
-    console.log("INSIDE fetchGFRDetails...");
+    this.logger.log("INSIDE fetchGFRDetails...");
 
     const gfrRoot = body?.message?.order ?? body?.message?.intent;
     const baseUrl = process.env.SOIL_HEALTH_BASE_URL;
@@ -3493,8 +3511,8 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       },
     };
 
-    console.log("GFR payload-->>", JSON.stringify(gfrPayload, null, 2));
-    console.log("GFR baseUrl-->>", baseUrl);
+    this.logger.log("GFR payload-->>", JSON.stringify(gfrPayload, null, 2));
+    this.logger.log("GFR baseUrl-->>", baseUrl);
 
     let gfrData: any;
     try {
@@ -3504,13 +3522,13 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         },
       });
       gfrData = response.data;
-      console.log(
+      this.logger.log(
         "GFR API response length-->>",
         gfrData?.data?.getCropRegistries?.length ?? 0,
       );
     } catch (error) {
-      console.error("GFR API error:", error.message);
-      console.error(
+      this.logger.error("GFR API error:", error.message);
+      this.logger.error(
         "GFR API error response:",
         JSON.stringify(error.response?.data, null, 2),
       );
@@ -3590,7 +3608,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
   }
 
   async fetchGFRRecommendation(body: any): Promise<any> {
-    console.log("INSIDE fetchGFRRecommendation...");
+    this.logger.log("INSIDE fetchGFRRecommendation...");
 
     const gfrRoot = body?.message?.order ?? body?.message?.intent;
     const baseUrl = process.env.SOIL_HEALTH_BASE_URL;
@@ -3662,12 +3680,12 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         headers: { "Content-Type": "application/json" },
       });
       accessToken = tokenResponse.data?.data?.generateAccessToken?.token;
-      console.log("GFR Recommendation accessToken--->>", accessToken);
+      this.logger.log("GFR Recommendation accessToken--->>", accessToken);
       if (!accessToken) {
         return buildError("auth_error", "Failed to retrieve access token");
       }
     } catch (error) {
-      console.error("GFR Recommendation token error:", error.message);
+      this.logger.error("GFR Recommendation token error:", error.message);
       return buildError(
         "auth_error",
         `Token retrieval failed: ${error.message}`,
@@ -3687,7 +3705,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       },
     };
 
-    console.log(
+    this.logger.log(
       "GFR Recommendation SHC payload-->>",
       JSON.stringify(shcPayload, null, 2),
     );
@@ -3701,12 +3719,12 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         },
       });
       shcData = shcResponse.data;
-      console.log(
+      this.logger.log(
         "GFR Recommendation SHC response length-->>",
         shcData?.data?.getTestForAuthUser?.length ?? 0,
       );
     } catch (error) {
-      console.error("GFR Recommendation SHC API error:", error.message);
+      this.logger.error("GFR Recommendation SHC API error:", error.message);
       return buildError(
         "api_error",
         error.response?.data?.errors?.[0]?.message ||
@@ -3732,7 +3750,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       OC: results?.OC ?? null,
     };
 
-    console.log("GFR Recommendation NPK values-->>", npkResults);
+    this.logger.log("GFR Recommendation NPK values-->>", npkResults);
 
     // Extract crops, stateId, naturalFarming from tags
     const crops = getTagValue("crops") ?? [];
@@ -3751,7 +3769,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       },
     };
 
-    console.log(
+    this.logger.log(
       "GFR Recommendation payload-->>",
       JSON.stringify(recommendationPayload, null, 2),
     );
@@ -3768,12 +3786,12 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         },
       );
       recommendationData = recommendationResponse.data;
-      console.log(
+      this.logger.log(
         "GFR Recommendation response-->>",
         JSON.stringify(recommendationData, null, 2),
       );
     } catch (error) {
-      console.error("GFR Recommendation API error:", error.message);
+      this.logger.error("GFR Recommendation API error:", error.message);
       return buildError(
         "api_error",
         error.response?.data?.errors?.[0]?.message ||

@@ -1,13 +1,14 @@
 import { components } from 'types/schema';
 import { SwayamApiResponse } from 'types/SwayamApiResponse';
 import { SwayamCourse } from 'types/SwayamCourese';
+import { appLogger } from '../src/services/logger/logger.service';
 
 
 export const scholarshipCatalogGenerator = (
   apiData: any,
   query: string,
 ) => {
-  console.log("apidata 370", apiData)
+  appLogger.log("apidata 370", apiData)
   const courses: ReadonlyArray<{ node: any }> =
     apiData;
   const providerWise = {};
@@ -199,7 +200,7 @@ export const generateOrder = (
 };
 
 export const selectItemMapper = (item: any) => {
-  console.log("item 563", item)
+  appLogger.log("item 563", item)
   const selectItemOrder = {
     provider: {
       id: `${item.user_id}`,
@@ -742,15 +743,15 @@ export const flnCatalogGenerator = (
   apiData: any,
   query: string,
 ) => {
-  console.log("apidata", apiData)
-  console.log("query", query)
+  appLogger.log("apidata", apiData)
+  appLogger.log("query", query)
   const courses: ReadonlyArray<{ node: any }> =
     apiData;
   const providerWise = {};
   //let categories: any = new Set();
 
   courses.forEach((course: any, index) => {
-    console.log("course 234", course)
+    appLogger.log("course 234", course)
     const item = course;
     const provider = course.user_id;
     // creating the provider wise map
@@ -772,9 +773,9 @@ export const flnCatalogGenerator = (
 
 
   // adding providers
-  console.log("providerWise", providerWise)
+  appLogger.log("providerWise", providerWise)
   catalog['providers'] = Object.keys(providerWise).map((provider: string) => {
-    // console.log("--------> ",providerWise[provider])
+    // appLogger.log("--------> ",providerWise[provider])
     const providerObj: components['schemas']['Provider'] = {
       id: provider,
       descriptor: {
@@ -1365,7 +1366,7 @@ export const pmfbyPolicyGenerator = (apiData: any, query: string) => {
   return catalog;
 };
 export const pmfbyClaimStatusGenerator = (apiData: any, query: string) => {
-  console.log("apiData", apiData);
+  appLogger.log("apiData", apiData);
   const claims: any[] = apiData;
   const providerWise: Record<string, any[]> = {};
   const defaultProvider = 'SchemeFinder';
