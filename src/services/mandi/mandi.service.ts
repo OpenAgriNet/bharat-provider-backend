@@ -173,11 +173,29 @@ export class MandiService {
         message: { catalog },
       };
     } catch (err) {
+      const ax = err as { response?: { status?: number; data?: { error?: string } }; message?: string };
+      const apiError = ax?.response?.data?.error;
+      const message = apiError || (err as Error).message;
       this.logger.error(
-        `MANDI search failed commodity=${intent.commodityName} location=${intent.locationName} error=${(err as Error).message}`,
-        (err as any)?.response?.data ?? "",
+        `MANDI search failed commodity=${intent.commodityName} location=${intent.locationName} error=${message}`,
+        ax?.response?.data ?? "",
         this.logCtx(body),
       );
+
+      if (ax?.response?.status === 403) {
+        return {
+          context: onSearchContext,
+          message: {
+            catalog: this.catalogCompact.errorCatalog(
+              "agmarknet_auth_failed",
+              apiError?.includes("inactive")
+                ? "Agmarknet credentials inactive for data APIs — contact Agmarknet to activate BV-Data-Agmarknet"
+                : "Agmarknet token rejected — verify AGMARKNET_ACCESS_NAME and AGMARKNET_PASSWORD",
+            ),
+          },
+        };
+      }
+
       throw err;
     }
   }

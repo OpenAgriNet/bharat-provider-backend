@@ -13,16 +13,16 @@ export interface VistaarLocationParams {
 @Injectable()
 export class AgmarknetApiService {
   private readonly baseUrl = (
-    process.env.AGMARKNET_BASE_URL || process.env.MANDI_BASE_URL || "https://api.agmarknet.gov.in"
+    process.env.AGMARKNET_BASE_URL || ""
   ).replace(/\/$/, "");
   private readonly accessName = process.env.AGMARKNET_ACCESS_NAME;
   private readonly password = process.env.AGMARKNET_PASSWORD;
 
-  /**
-   * Agmarknet dynamic tokens are single-use and a new generate-dynamic-token
-   * invalidates any previous token for the same credentials. Serialize all
-   * token+API call pairs to avoid concurrent requests stealing tokens.
-   */
+  /** Cached token — reused across requests until Agmarknet rejects it. */
+  private cachedToken: string | null = null;
+  private tokenRefreshPromise: Promise<string> | null = null;
+
+  /** Serialize Agmarknet calls so concurrent requests do not race on token refresh. */
   private agmarknetChain: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly logger: LoggerService) {}
@@ -36,14 +36,36 @@ export class AgmarknetApiService {
     return run;
   }
 
+  private assertCredentials(): void {
+    if (!this.accessName || !this.password) {
+      throw new Error(
+        "Agmarknet auth not configured: set AGMARKNET_ACCESS_NAME and AGMARKNET_PASSWORD",
+      );
+    }
+  }
+
   private isTokenRejected(err: unknown): boolean {
     const ax = err as AxiosError<{ error?: string }>;
     const status = ax?.response?.status;
     const msg = String(ax?.response?.data?.error ?? ax?.message ?? "").toLowerCase();
-    return status === 403 || msg.includes("token expired") || msg.includes("inactive");
+    return (
+      status === 403 ||
+      msg.includes("token expired") ||
+      msg.includes("inactive") ||
+      msg.includes("invalid token") ||
+      msg.includes("invalid or already used")
+    );
   }
 
-  private async generateToken(logCtx: string): Promise<string> {
+  private isNoDataResponse(err: unknown): boolean {
+    const ax = err as AxiosError<{ message?: string; success?: boolean }>;
+    if (ax?.response?.status !== 400) return false;
+    const msg = String(ax?.response?.data?.message ?? "").toLowerCase();
+    return msg.includes("no data");
+  }
+
+  private async requestNewToken(logCtx: string): Promise<string> {
+    this.assertCredentials();
     const url = `${this.baseUrl}/v1/generate-dynamic-token-agmarknet`;
     this.logger.log("MANDI calling Agmarknet generate-dynamic-token", logCtx);
 
@@ -56,77 +78,106 @@ export class AgmarknetApiService {
     if (!token) {
       throw new Error("Agmarknet token response missing token field");
     }
+    this.cachedToken = token;
     this.logger.log("MANDI Agmarknet token generated", logCtx);
     return token;
   }
 
-  async fetchMasterData(option = 2, trigger = "sync"): Promise<any[]> {
-    const logCtx = `[commoditySync][txn:${trigger}]`;
-    return this.runSerialized(async () => {
-      const token = await this.generateToken(logCtx);
-      const url = `${this.baseUrl}/v1/fetch-agmarknet-master-data`;
-      this.logger.log(`MANDI fetching master data option=${option}`, logCtx);
-
-      const response = await axios.get(url, {
-        params: { token, option },
-        timeout: 30000,
-      });
-      const data = response.data;
-      if (!Array.isArray(data)) {
-        throw new Error(`Master data option=${option} did not return an array`);
-      }
-      this.logger.log(`MANDI master data fetched rows=${data.length}`, logCtx);
-      return data;
-    });
+  private invalidateToken(): void {
+    this.cachedToken = null;
   }
 
-  async fetchVistaarLocation(
-    params: VistaarLocationParams,
+  /** Return cached token, or fetch a new one. Concurrent callers share one refresh. */
+  private async getToken(logCtx: string, forceRefresh = false): Promise<string> {
+    if (!forceRefresh && this.cachedToken) {
+      return this.cachedToken;
+    }
+
+    if (this.tokenRefreshPromise) {
+      return this.tokenRefreshPromise;
+    }
+
+    this.tokenRefreshPromise = this.requestNewToken(logCtx).finally(() => {
+      this.tokenRefreshPromise = null;
+    });
+    return this.tokenRefreshPromise;
+  }
+
+  private async getWithAuth(
+    path: string,
+    params: Record<string, string>,
     logCtx: string,
-  ): Promise<any[]> {
+    label: string,
+  ): Promise<any> {
     return this.runSerialized(async () => {
-      const url = `${this.baseUrl}/v1/fetch-agmarknet-vistaar-location`;
       const maxAttempts = 2;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const token = await this.generateToken(logCtx);
-        const query = new URLSearchParams({
-          commodity_id: String(params.commodityId),
-          token,
-          date: params.date,
-          lat: String(params.lat),
-          long: String(params.lon),
-        });
+        const forceRefresh = attempt > 1;
+        if (forceRefresh) {
+          this.invalidateToken();
+          this.logger.warn(`MANDI token expired generating new token attempt=${attempt}`, logCtx);
+        }
 
-        this.logger.log(
-          `MANDI calling vistaar-location attempt=${attempt} commodity_id=${params.commodityId} date=${params.date} lat=${params.lat} lon=${params.lon}`,
-          logCtx,
-        );
+        const token = await this.getToken(logCtx, forceRefresh);
+        const query = new URLSearchParams({ ...params, token });
+        const url = `${this.baseUrl}${path}?${query.toString()}`;
+
+        this.logger.log(`MANDI calling ${label} attempt=${attempt}`, logCtx);
 
         try {
-          const response = await axios.get(`${url}?${query.toString()}`, {
-            timeout: 30000,
-          });
-          const records = this.normalizeRecords(response.data);
-          this.logger.log(
-            `MANDI vistaar-location returned rows=${records.length}`,
-            logCtx,
-          );
-          return records;
+          const response = await axios.get(url, { timeout: 30000 });
+          return response.data;
         } catch (err) {
+          if (this.isNoDataResponse(err)) {
+            this.logger.warn(`MANDI ${label} no data available`, logCtx);
+            return [];
+          }
           if (this.isTokenRejected(err) && attempt < maxAttempts) {
-            this.logger.warn(
-              "MANDI vistaar-location token rejected fetching fresh token and retrying",
-              logCtx,
-            );
+            this.logger.warn(`MANDI ${label} token rejected will refresh and retry`, logCtx);
             continue;
           }
           throw err;
         }
       }
 
-      return [];
+      throw new Error(`MANDI ${label} failed after token refresh`);
     });
+  }
+
+  async fetchMasterData(option = 2, trigger = "sync"): Promise<any[]> {
+    const logCtx = `[commoditySync][txn:${trigger}]`;
+    const data = await this.getWithAuth(
+      "/v1/fetch-agmarknet-master-data",
+      { option: String(option) },
+      logCtx,
+      `master-data option=${option}`,
+    );
+    if (!Array.isArray(data)) {
+      throw new Error(`Master data option=${option} did not return an array`);
+    }
+    this.logger.log(`MANDI master data fetched rows=${data.length}`, logCtx);
+    return data;
+  }
+
+  async fetchVistaarLocation(
+    params: VistaarLocationParams,
+    logCtx: string,
+  ): Promise<any[]> {
+    const data = await this.getWithAuth(
+      "/v1/fetch-agmarknet-vistaar-location",
+      {
+        commodity_id: String(params.commodityId),
+        date: params.date,
+        lat: String(params.lat),
+        long: String(params.lon),
+      },
+      logCtx,
+      `vistaar-location commodity_id=${params.commodityId} date=${params.date} lat=${params.lat} lon=${params.lon}`,
+    );
+    const records = this.normalizeRecords(data);
+    this.logger.log(`MANDI vistaar-location returned rows=${records.length}`, logCtx);
+    return records;
   }
 
   normalizeRecords(data: any): any[] {
