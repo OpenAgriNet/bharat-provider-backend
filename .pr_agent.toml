@@ -9,6 +9,8 @@ extra_instructions = """
 Focus on NestJS/Node.js backend issues: error handling, input validation,
 security (auth, SQL injection, secrets), API contract consistency, and
 performance. Flag missing tests for critical paths.
+For workflow/config changes, review GitHub Actions permissions, secret usage,
+and CI safety.
 """
 
 [pr_description]
