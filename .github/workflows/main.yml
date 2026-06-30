@@ -2,7 +2,7 @@ name: Deploy to DEV
 on: 
   push: 
     branches:
-      - main
+      - dev
 jobs:
   build:
     name: Generate Build and Deploy to DEV
