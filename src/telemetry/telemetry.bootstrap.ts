@@ -1,8 +1,20 @@
+import { Logger } from '@nestjs/common';
 import { $t } from '@project-sunbird/telemetry-sdk';
 import { TelemetryWrap } from 'telemetry-wrap';
-import { getTelemetryEndpoint } from './telemetry.config';
+import { getTelemetryEndpoint, isTelemetryEnabled } from './telemetry.config';
+
+const telemetryLogger = new Logger('Telemetry');
 
 let telemetryReady = false;
+
+function writeTelemetryLog(level: 'log' | 'warn' | 'error', message: string): void {
+  telemetryLogger[level](message);
+  if (level === 'error') {
+    console.error(message);
+    return;
+  }
+  console.log(message);
+}
 
 export function isTelemetryReady(): boolean {
   return telemetryReady;
@@ -27,4 +39,29 @@ export function bootstrapTelemetry(): void {
   // telemetry-wrap.init() calls a removed SDK API; mark ready for its helpers.
   (TelemetryWrap as unknown as { initialised: boolean }).initialised = true;
   telemetryReady = true;
+
+  writeTelemetryLog(
+    'log',
+    `[Telemetry] Initialised → ${endpoint} (channel=${process.env.TELEMETRY_CHANNEL || 'beckn-network-provider'})`,
+  );
+}
+
+export function logTelemetryStartupSummary(): void {
+  if (!isTelemetryEnabled()) {
+    writeTelemetryLog('warn', '[Telemetry] Status: DISABLED (TELEMETRY_ENABLED=false)');
+    return;
+  }
+
+  if (isTelemetryReady()) {
+    writeTelemetryLog(
+      'log',
+      `[Telemetry] Status: ENABLED — capturing bpp_network_api_call + ext_api_call`,
+    );
+    return;
+  }
+
+  writeTelemetryLog(
+    'error',
+    '[Telemetry] Status: FAILED — events will not be captured',
+  );
 }

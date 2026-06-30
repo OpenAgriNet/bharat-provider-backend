@@ -7,51 +7,55 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from '@nestjs/common';
 import {
   bootstrapTelemetry,
-  getTelemetryEndpoint,
   isTelemetryEnabled,
+  logTelemetryStartupSummary,
   setupAxiosTelemetry,
 } from './telemetry';
 
 config();
 
-function initTelemetry(logger: Logger): void {
+function initTelemetry(): void {
   if (!isTelemetryEnabled()) {
-    logger.log('Telemetry disabled (TELEMETRY_ENABLED=false)');
+    logTelemetryStartupSummary();
     return;
   }
 
   try {
     bootstrapTelemetry();
     setupAxiosTelemetry();
-    logger.log(`Telemetry initialised → ${getTelemetryEndpoint()}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const logger = new Logger('Telemetry');
     logger.error(`Telemetry init failed: ${message}`);
+    console.error(`[Telemetry] Init failed: ${message}`);
   }
 }
+
+// Initialise telemetry before Nest boots so Docker logs show status immediately.
+initTelemetry();
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const logger = new Logger('Bootstrap');
 
-  initTelemetry(logger);
+  if (process.env.SENTRY_DSN) {
+    Sentry.init({ dsn: process.env.SENTRY_DSN });
+    app.use(Sentry.Handlers.requestHandler());
+    app.use(Sentry.Handlers.errorHandler());
+  }
 
-  Sentry.init({
-    dsn: 'YOUR_SENTRY_DSN_HERE', // Replace with your actual Sentry DSN
-  });
-  app.use(Sentry.Handlers.requestHandler());
-  app.use(Sentry.Handlers.errorHandler());
   app.setViewEngine('ejs');
-  app.setBaseViewsDir(join('src','.', 'views'));
-
-
+  app.setBaseViewsDir(join('src', '.', 'views'));
   app.enableCors();
-  
+
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  
-  // Log after server starts
-  logger.log(`🚀 Application is running on: http://localhost:${port}`);
-  logger.log(`📡 Server started successfully on port ${port}`);
+
+  logger.log(`Application is running on: http://localhost:${port}`);
+
+  if (isTelemetryEnabled()) {
+    logTelemetryStartupSummary();
+  }
 }
+
 bootstrap();

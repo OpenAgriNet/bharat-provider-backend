@@ -3,7 +3,10 @@ export function getTelemetryEndpoint(): string {
     return process.env.TELEMETRY_ENDPOINT;
   }
 
-  const host = (process.env.TELEMETRY_HOST || 'https://dev-vistaar.da.gov.in').replace(
+  const host = (
+    process.env.TELEMETRY_HOST ||
+    'https://chat-vistaar.da.gov.in/observability-service'
+  ).replace(
     /\/$/,
     '',
   );

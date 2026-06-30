@@ -12,4 +12,8 @@ export {
   getTelemetryEndpoint,
   isTelemetryEnabled,
 } from './telemetry.config';
-export { bootstrapTelemetry, isTelemetryReady } from './telemetry.bootstrap';
+export {
+  bootstrapTelemetry,
+  isTelemetryReady,
+  logTelemetryStartupSummary,
+} from './telemetry.bootstrap';
