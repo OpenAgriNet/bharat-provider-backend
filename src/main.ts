@@ -5,8 +5,8 @@ import * as Sentry from '@sentry/node';
 import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from '@nestjs/common';
-import { TelemetryWrap } from 'telemetry-wrap';
 import {
+  bootstrapTelemetry,
   getTelemetryEndpoint,
   isTelemetryEnabled,
   setupAxiosTelemetry,
@@ -20,19 +20,14 @@ function initTelemetry(logger: Logger): void {
     return;
   }
 
-  TelemetryWrap.init({
-    pdata: {
-      id: process.env.TELEMETRY_PDATA_ID || 'beckn-onix-network-provider',
-      ver: process.env.TELEMETRY_PDATA_VER || 'v1.0',
-      pid: process.env.TELEMETRY_PDATA_PID || 'network-provider',
-    },
-    channel: process.env.TELEMETRY_CHANNEL || 'beckn-network-provider',
-    endpoint: getTelemetryEndpoint(),
-    batchSize: parseInt(process.env.TELEMETRY_BATCH_SIZE || '20', 10),
-  });
-
-  setupAxiosTelemetry();
-  logger.log(`Telemetry initialised → ${getTelemetryEndpoint()}`);
+  try {
+    bootstrapTelemetry();
+    setupAxiosTelemetry();
+    logger.log(`Telemetry initialised → ${getTelemetryEndpoint()}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`Telemetry init failed: ${message}`);
+  }
 }
 
 async function bootstrap() {
