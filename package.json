@@ -54,7 +54,7 @@
     "pg": "^8.11.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.2.0",
-    "telemetry-wrap": "^1.0.3",
+    "telemetry-wrap": "1.0.4",
     "twilio": "^4.11.2",
     "typeorm": "^0.3.16",
     "uuid": "^9.0.1",
