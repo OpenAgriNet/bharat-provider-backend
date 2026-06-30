@@ -4,7 +4,6 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import {
   BecknTelemetryInterceptor,
-  ExtApiLifecycleInterceptor,
   isTelemetryEnabled,
 } from "./telemetry";
 import { AuthModule } from "./auth/auth.module";
@@ -53,10 +52,6 @@ import { SmamService } from "./services/smam/smam.service";
           {
             provide: APP_INTERCEPTOR,
             useClass: BecknTelemetryInterceptor,
-          },
-          {
-            provide: APP_INTERCEPTOR,
-            useClass: ExtApiLifecycleInterceptor,
           },
         ]
       : []),
