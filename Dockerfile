@@ -1,23 +1,32 @@
-FROM node:20.0.0
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Install curl for weather API calls
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-COPY package*.json ./
-
-# Use only valid npm config options
+COPY package*.json .npmrc ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm config set fetch-retries 10 \
-    && npm config set fetch-retry-mintimeout 20000 \
-    && npm config set fetch-retry-maxtimeout 120000 \
-    && npm install --prefer-offline --no-audit --no-fund
+    npm install --legacy-peer-deps --no-audit --no-fund
 
 COPY . .
-
 RUN npm run build
+
+FROM node:20-slim AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json .npmrc ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --omit=dev --legacy-peer-deps --no-audit --no-fund
+
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/src/views ./src/views
+COPY --from=builder /app/course.json ./course.json
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["node", "dist/src/main.js"]
