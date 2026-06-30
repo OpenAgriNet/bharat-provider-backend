@@ -5,13 +5,11 @@ on:
       - main
       - dev
       - BharatVistaar
-      - dev-telemetry
   pull_request:
     branches:
       - main
       - dev
       - BharatVistaar
-      - dev-telemetry
 env:
   BASE_IMAGE_NAME: icar-provider-service-backend
 jobs:
