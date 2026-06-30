@@ -1,0 +1,18 @@
+[config]
+model = "gpt-4o-mini"
+response_language = "en-US"
+
+[pr_reviewer]
+require_score_review = false
+inline_code_comments = true
+extra_instructions = """
+Focus on NestJS/Node.js backend issues: error handling, input validation,
+security (auth, SQL injection, secrets), API contract consistency, and
+performance. Flag missing tests for critical paths.
+For workflow/config changes, review GitHub Actions permissions, secret usage,
+and CI safety.
+"""
+
+[pr_description]
+publish_labels = true
+generate_ai_title = true
