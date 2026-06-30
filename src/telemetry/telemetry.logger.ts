@@ -1,11 +1,19 @@
+import { Logger } from '@nestjs/common';
 import { $t } from '@project-sunbird/telemetry-sdk';
 import {
   TelemetryWrap,
   generateMid,
   type ApiLifecycleEvent,
 } from 'telemetry-wrap';
+import { isTelemetryReady } from './telemetry.bootstrap';
 
 export type TelemetryApiCallType = 'bpp_network_api_call' | 'ext_api_call';
+
+const telemetryDebugLogger = new Logger('TelemetryDebug');
+
+function isTelemetryDebugEnabled(): boolean {
+  return process.env.TELEMETRY_DEBUG === 'true';
+}
 
 function buildApiCallParams(event: ApiLifecycleEvent) {
   return [
@@ -28,7 +36,22 @@ export function logTelemetryApiCall(
   event: ApiLifecycleEvent,
   type: TelemetryApiCallType,
 ): void {
+  if (!isTelemetryReady()) {
+    if (isTelemetryDebugEnabled()) {
+      telemetryDebugLogger.warn(
+        `Skipped ${type} for ${event.method} ${event.url} — telemetry not initialised`,
+      );
+    }
+    return;
+  }
+
   try {
+    if (isTelemetryDebugEnabled()) {
+      telemetryDebugLogger.log(
+        `Captured ${type}: ${event.method} ${event.url} [${event.responseStatus}] ${event.latencyMs}ms`,
+      );
+    }
+
     $t.log(
       {
         type,
