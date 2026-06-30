@@ -1,0 +1,16 @@
+node_modules
+dist
+.git
+.github
+coverage
+test
+docs
+*.log
+.env
+.env.*
+.DS_Store
+.vscode
+.idea
+docker-compose.yaml
+*.tar
+/files
