@@ -8,6 +8,7 @@ export {
 } from './telemetry.context';
 export {
   getTelemetryEndpoint,
+  getTelemetryResponseMaxBytes,
   isTelemetryEnabled,
 } from './telemetry.config';
 export {

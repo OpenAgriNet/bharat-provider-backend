@@ -1,10 +1,11 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { sanitisePayload, truncateBody } from 'telemetry-wrap';
+import { sanitisePayload } from 'telemetry-wrap';
 import { getTelemetryContext } from './telemetry.context';
 import { getTelemetryEndpoint } from './telemetry.config';
 import { emitOeItemResponse } from './oe-telemetry.emitter';
 import {
   buildExtApiEnvelope,
+  captureResponsePayload,
   extractGraphqlFromAxiosData,
   isApiSuccess,
   parseAxiosRequestData,
@@ -41,7 +42,7 @@ function logOutboundCall(
   const rawRequest = parseAxiosRequestData(config.data ?? config.params);
   const requestBody = sanitisePayload(rawRequest);
   const graphql = extractGraphqlFromAxiosData(rawRequest);
-  const truncatedBody = truncateBody(data);
+  const truncatedBody = captureResponsePayload(data);
   const success = isApiSuccess(status, data, error);
 
   try {

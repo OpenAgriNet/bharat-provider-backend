@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Observable, throwError } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
-import { isEmptyBody, sanitisePayload, truncateBody } from 'telemetry-wrap';
+import { isEmptyBody, sanitisePayload } from 'telemetry-wrap';
 import {
   TelemetryContext,
   extractBecknContext,
@@ -17,7 +17,11 @@ import {
   emitOeItemResponse,
   emitOeStart,
 } from './oe-telemetry.emitter';
-import { buildBecknEnvelope, isApiSuccess } from './telemetry-payload.builder';
+import {
+  buildBecknEnvelope,
+  captureResponsePayload,
+  isApiSuccess,
+} from './telemetry-payload.builder';
 
 @Injectable()
 export class BecknTelemetryInterceptor implements NestInterceptor {
@@ -87,7 +91,7 @@ export class BecknTelemetryInterceptor implements NestInterceptor {
   ): void {
     try {
       const url = req.originalUrl || req.url || 'unknown';
-      const truncatedResponse = truncateBody(responseBody);
+      const truncatedResponse = captureResponsePayload(responseBody);
       const success = isApiSuccess(statusCode, responseBody, error);
       const isEmpty = statusCode === 200 && isEmptyBody(responseBody);
 
