@@ -1,7 +1,5 @@
 export { BecknTelemetryInterceptor } from './beckn-telemetry.interceptor';
-export { ExtApiLifecycleInterceptor } from './ext-api-lifecycle.interceptor';
 export { setupAxiosTelemetry } from './axios-telemetry.setup';
-export { logTelemetryApiCall, type TelemetryApiCallType } from './telemetry.logger';
 export {
   getTelemetryContext,
   extractBecknContext,
@@ -14,6 +12,17 @@ export {
 } from './telemetry.config';
 export {
   bootstrapTelemetry,
+  formatTelemetryStartupSummary,
   isTelemetryReady,
   logTelemetryStartupSummary,
 } from './telemetry.bootstrap';
+export {
+  resolveServiceName,
+  resolveRouteName,
+  resolveExternalServiceName,
+} from './service-name.resolver';
+export {
+  emitOeStart,
+  emitOeItemResponse,
+  emitOeEnd,
+} from './oe-telemetry.emitter';

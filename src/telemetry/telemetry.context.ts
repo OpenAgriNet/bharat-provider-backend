@@ -1,5 +1,14 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  extractUseCaseMetadata,
+  resolveRouteName,
+  resolveServiceName,
+} from './service-name.resolver';
+import {
+  createFlowState,
+  type TelemetryFlowState,
+} from './telemetry.flow-buffer';
 
 export interface TelemetryContext {
   sessionId: string;
@@ -7,23 +16,52 @@ export interface TelemetryContext {
   context: Record<string, string>;
 }
 
-const telemetryStorage = new AsyncLocalStorage<TelemetryContext>();
+const telemetryStorage = new AsyncLocalStorage<TelemetryFlowState>();
 
 export function runWithTelemetryContext<T>(
   ctx: TelemetryContext,
   fn: () => T,
 ): T {
-  return telemetryStorage.run(ctx, fn);
+  return telemetryStorage.run(createFlowState(ctx), fn);
+}
+
+export function getTelemetryFlowState(): TelemetryFlowState | undefined {
+  return telemetryStorage.getStore();
 }
 
 export function getTelemetryContext(): TelemetryContext {
   return (
-    telemetryStorage.getStore() ?? {
+    telemetryStorage.getStore()?.context ?? {
       sessionId: 'unknown',
       questionId: 'unknown',
       context: {},
     }
   );
+}
+
+function extractTagsMap(tags: unknown): Record<string, string> {
+  if (!tags) return {};
+
+  if (typeof tags === 'object' && !Array.isArray(tags)) {
+    return Object.fromEntries(
+      Object.entries(tags).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    );
+  }
+
+  if (Array.isArray(tags)) {
+    const result: Record<string, string> = {};
+    for (const tag of tags) {
+      if (!tag || typeof tag !== 'object') continue;
+      const code = (tag as { code?: string }).code;
+      const value = (tag as { value?: string }).value;
+      if (code && value) result[code] = value;
+    }
+    return result;
+  }
+
+  return {};
 }
 
 export function extractBecknContext(req: {
@@ -33,26 +71,50 @@ export function extractBecknContext(req: {
   originalUrl?: string;
 }): TelemetryContext {
   const body = req.body ?? {};
-  const becknContext = (body.context ?? {}) as Record<string, string>;
+  const becknContext = (body.context ?? {}) as Record<string, unknown>;
+  const message = (body.message ?? {}) as Record<string, unknown>;
+  const intent = (message.intent ?? {}) as Record<string, unknown>;
 
-  const transactionId = becknContext.transaction_id ?? uuidv4();
-  const messageId = becknContext.message_id ?? uuidv4();
-  const action = becknContext.action ?? inferActionFromPath(req.originalUrl ?? req.url);
-  const domain = becknContext.domain ?? 'unknown';
-  const bppId = becknContext.bpp_id ?? '';
-  const bapId = becknContext.bap_id ?? '';
+  const contextTags = extractTagsMap(becknContext.tags);
+  const intentTags = extractTagsMap(intent.tags);
+  const mergedTags = { ...intentTags, ...contextTags };
+
+  const transactionId = String(becknContext.transaction_id ?? uuidv4());
+  const messageId = String(becknContext.message_id ?? uuidv4());
+  const sessionId = mergedTags.session_id ?? transactionId;
+  const questionId = mergedTags.question_id ?? messageId;
+
+  const requestPath = req.originalUrl ?? req.url ?? 'unknown';
+  const serviceName = resolveServiceName(
+    body as Parameters<typeof resolveServiceName>[0],
+    requestPath,
+  );
+  const routeName = resolveRouteName(
+    body as Parameters<typeof resolveRouteName>[0],
+    serviceName,
+  );
+  const useCaseMeta = extractUseCaseMetadata(body);
 
   return {
-    sessionId: transactionId,
-    questionId: messageId,
+    sessionId,
+    questionId,
     context: {
+      session_id: sessionId,
+      question_id: questionId,
       beckn_transaction_id: transactionId,
       beckn_message_id: messageId,
-      beckn_action: action,
-      beckn_domain: domain,
-      beckn_bpp_id: bppId,
-      beckn_bap_id: bapId,
-      request_path: req.originalUrl ?? req.url ?? 'unknown',
+      beckn_action: String(
+        becknContext.action ?? inferActionFromPath(requestPath),
+      ),
+      beckn_domain: String(becknContext.domain ?? 'unknown'),
+      beckn_bpp_id: String(becknContext.bpp_id ?? ''),
+      beckn_bap_id: String(becknContext.bap_id ?? ''),
+      request_path: requestPath,
+      service_name: serviceName,
+      route_name: routeName,
+      use_case: serviceName,
+      use_case_meta: JSON.stringify(useCaseMeta),
+      mobility_route: routeName,
     },
   };
 }

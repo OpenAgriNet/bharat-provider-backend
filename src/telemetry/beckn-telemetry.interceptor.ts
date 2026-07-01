@@ -6,18 +6,18 @@ import {
 } from '@nestjs/common';
 import { Observable, throwError } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
-import {
-  TelemetryWrap,
-  isEmptyBody,
-  sanitisePayload,
-  truncateBody,
-} from 'telemetry-wrap';
+import { isEmptyBody, sanitisePayload, truncateBody } from 'telemetry-wrap';
 import {
   TelemetryContext,
   extractBecknContext,
   runWithTelemetryContext,
 } from './telemetry.context';
-import { logTelemetryApiCall } from './telemetry.logger';
+import {
+  emitOeEnd,
+  emitOeItemResponse,
+  emitOeStart,
+} from './oe-telemetry.emitter';
+import { buildBecknEnvelope, isApiSuccess } from './telemetry-payload.builder';
 
 @Injectable()
 export class BecknTelemetryInterceptor implements NestInterceptor {
@@ -30,40 +30,40 @@ export class BecknTelemetryInterceptor implements NestInterceptor {
 
     req.__telemetryCtx = telemetryCtx;
 
-    this.logInboundReceived(telemetryCtx);
-
     return new Observable((observer) => {
       runWithTelemetryContext(telemetryCtx, () => {
+        emitOeStart(telemetryCtx);
+
         next
           .handle()
           .pipe(
             tap((responseBody) => {
               const latencyMs = Date.now() - requestTime;
               const statusCode = res.statusCode || 200;
-
-              this.logInboundCompleted(
+              this.captureInbound(
                 req,
                 telemetryCtx,
-                requestTime,
                 statusCode,
                 responseBody,
                 latencyMs,
               );
+              emitOeEnd(telemetryCtx, latencyMs, true);
             }),
             catchError((err) => {
               const latencyMs = Date.now() - requestTime;
               const statusCode =
                 err?.status ?? err?.getStatus?.() ?? res.statusCode ?? 500;
+              const responseBody = err?.response ?? { message: err?.message };
 
-              this.logInboundCompleted(
+              this.captureInbound(
                 req,
                 telemetryCtx,
-                requestTime,
                 statusCode,
-                err?.response ?? { message: err?.message },
+                responseBody,
                 latencyMs,
                 err?.message,
               );
+              emitOeEnd(telemetryCtx, latencyMs, false, err?.message);
 
               return throwError(() => err);
             }),
@@ -77,68 +77,36 @@ export class BecknTelemetryInterceptor implements NestInterceptor {
     });
   }
 
-  private logInboundReceived(ctx: TelemetryContext): void {
-    try {
-      TelemetryWrap.logLifecycle({
-        action: `beckn.${ctx.context.beckn_action}.received`,
-        domain: ctx.context.beckn_domain,
-        durationMs: 0,
-        context: {
-          ...ctx.context,
-          direction: 'inbound',
-          source: 'beckn-network',
-        },
-      });
-    } catch {
-      // Telemetry must never break the request flow
-    }
-  }
-
-  private logInboundCompleted(
+  private captureInbound(
     req: { method: string; originalUrl?: string; url?: string; body?: unknown },
     ctx: TelemetryContext,
-    requestTime: number,
     statusCode: number,
     responseBody: unknown,
     latencyMs: number,
     error?: string,
   ): void {
     try {
-      const truncatedBody = truncateBody(responseBody);
+      const url = req.originalUrl || req.url || 'unknown';
+      const truncatedResponse = truncateBody(responseBody);
+      const success = isApiSuccess(statusCode, responseBody, error);
       const isEmpty = statusCode === 200 && isEmptyBody(responseBody);
 
-      logTelemetryApiCall(
-        {
-          requestTime: new Date(requestTime).toISOString(),
-          url: req.originalUrl || req.url || 'unknown',
-          method: req.method,
-          requestPayload: sanitisePayload(req.body),
-          sessionId: ctx.sessionId,
-          questionId: ctx.questionId,
-          responseStatus: statusCode,
-          responseBody: truncatedBody,
-          isEmptyResponse: isEmpty,
-          latencyMs,
-          error,
-          context: {
-            ...ctx.context,
-            direction: 'inbound',
-            source: 'beckn-network',
-          },
-        },
-        'bpp_network_api_call',
-      );
-
-      TelemetryWrap.logLifecycle({
-        action: `beckn.${ctx.context.beckn_action}.${error || statusCode >= 400 ? 'failed' : 'completed'}`,
-        domain: ctx.context.beckn_domain,
-        durationMs: latencyMs,
-        context: {
-          ...ctx.context,
-          direction: 'inbound',
-          status: String(statusCode),
-          success: String(!error && statusCode < 400),
-        },
+      emitOeItemResponse(ctx, {
+        itemType: 'bpp_network_api_call',
+        serviceName: ctx.context.service_name ?? 'unknown',
+        method: req.method,
+        url,
+        requestPayload: buildBecknEnvelope(
+          ctx,
+          sanitisePayload(req.body),
+        ),
+        responsePayload: isEmpty
+          ? { _empty: true }
+          : sanitisePayload(truncatedResponse),
+        statusCode,
+        latencyMs,
+        success,
+        error,
       });
     } catch {
       // Telemetry must never break the request flow

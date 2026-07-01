@@ -7,17 +7,32 @@ const telemetryLogger = new Logger('Telemetry');
 
 let telemetryReady = false;
 
-function writeTelemetryLog(level: 'log' | 'warn' | 'error', message: string): void {
-  telemetryLogger[level](message);
-  if (level === 'error') {
-    console.error(message);
-    return;
-  }
-  console.log(message);
-}
-
 export function isTelemetryReady(): boolean {
   return telemetryReady;
+}
+
+export function formatTelemetryStartupSummary(): string {
+  if (!isTelemetryEnabled()) {
+    return 'Telemetry: DISABLED (TELEMETRY_ENABLED=false)';
+  }
+
+  if (isTelemetryReady()) {
+    const endpoint = getTelemetryEndpoint();
+    const channel = process.env.TELEMETRY_CHANNEL || 'beckn-network-provider';
+    return `Telemetry: ENABLED — initialised → ${endpoint} (channel=${channel};`;
+  }
+
+  return 'Telemetry: FAILED — events will not be captured';
+}
+
+export function logTelemetryStartupSummary(): void {
+  const message = formatTelemetryStartupSummary();
+  const level = message.includes('DISABLED')
+    ? 'warn'
+    : message.includes('FAILED')
+      ? 'error'
+      : 'log';
+  telemetryLogger[level](message);
 }
 
 export function bootstrapTelemetry(): void {
@@ -39,29 +54,4 @@ export function bootstrapTelemetry(): void {
   // telemetry-wrap.init() calls a removed SDK API; mark ready for its helpers.
   (TelemetryWrap as unknown as { initialised: boolean }).initialised = true;
   telemetryReady = true;
-
-  writeTelemetryLog(
-    'log',
-    `[Telemetry] Initialised → ${endpoint} (channel=${process.env.TELEMETRY_CHANNEL || 'beckn-network-provider'})`,
-  );
-}
-
-export function logTelemetryStartupSummary(): void {
-  if (!isTelemetryEnabled()) {
-    writeTelemetryLog('warn', '[Telemetry] Status: DISABLED (TELEMETRY_ENABLED=false)');
-    return;
-  }
-
-  if (isTelemetryReady()) {
-    writeTelemetryLog(
-      'log',
-      `[Telemetry] Status: ENABLED — capturing bpp_network_api_call + ext_api_call`,
-    );
-    return;
-  }
-
-  writeTelemetryLog(
-    'error',
-    '[Telemetry] Status: FAILED — events will not be captured',
-  );
 }

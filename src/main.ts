@@ -15,10 +15,7 @@ import {
 config();
 
 function initTelemetry(): void {
-  if (!isTelemetryEnabled()) {
-    logTelemetryStartupSummary();
-    return;
-  }
+  if (!isTelemetryEnabled()) return;
 
   try {
     bootstrapTelemetry();
@@ -27,7 +24,6 @@ function initTelemetry(): void {
     const message = error instanceof Error ? error.message : String(error);
     const logger = new Logger('Telemetry');
     logger.error(`Telemetry init failed: ${message}`);
-    console.error(`[Telemetry] Init failed: ${message}`);
   }
 }
 
@@ -51,11 +47,8 @@ async function bootstrap() {
   const port = process.env.PORT || 3000;
   await app.listen(port);
 
+  logTelemetryStartupSummary();
   logger.log(`Application is running on: http://localhost:${port}`);
-
-  if (isTelemetryEnabled()) {
-    logTelemetryStartupSummary();
-  }
 }
 
 bootstrap();

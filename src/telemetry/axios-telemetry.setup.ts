@@ -1,8 +1,15 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { isEmptyBody, sanitisePayload, truncateBody } from 'telemetry-wrap';
+import { sanitisePayload, truncateBody } from 'telemetry-wrap';
 import { getTelemetryContext } from './telemetry.context';
 import { getTelemetryEndpoint } from './telemetry.config';
-import { logTelemetryApiCall } from './telemetry.logger';
+import { emitOeItemResponse } from './oe-telemetry.emitter';
+import {
+  buildExtApiEnvelope,
+  extractGraphqlFromAxiosData,
+  isApiSuccess,
+  parseAxiosRequestData,
+} from './telemetry-payload.builder';
+import { resolveExternalServiceName } from './service-name.resolver';
 
 type TimedAxiosConfig = InternalAxiosRequestConfig & {
   __telemetryStart?: number;
@@ -27,31 +34,35 @@ function logOutboundCall(
   const start = config.__telemetryStart ?? Date.now();
   const latencyMs = Date.now() - start;
   const ctx = getTelemetryContext();
+  const url = config.url ?? 'unknown';
+  const method = (config.method ?? 'GET').toUpperCase();
+  const useCaseName = ctx.context.service_name ?? 'unknown';
+  const downstreamService = resolveExternalServiceName(url);
+  const rawRequest = parseAxiosRequestData(config.data ?? config.params);
+  const requestBody = sanitisePayload(rawRequest);
+  const graphql = extractGraphqlFromAxiosData(rawRequest);
   const truncatedBody = truncateBody(data);
-  const isEmpty = status === 200 && isEmptyBody(data);
+  const success = isApiSuccess(status, data, error);
 
   try {
-    logTelemetryApiCall(
-      {
-        requestTime: new Date(start).toISOString(),
-        url: config.url ?? 'unknown',
-        method: (config.method ?? 'GET').toUpperCase(),
-        requestPayload: sanitisePayload(config.data ?? config.params),
-        sessionId: ctx.sessionId,
-        questionId: ctx.questionId,
-        responseStatus: status,
-        responseBody: truncatedBody,
-        isEmptyResponse: isEmpty,
-        latencyMs,
-        error,
-        context: {
-          ...ctx.context,
-          direction: 'outbound',
-          source: 'external-api',
-        },
-      },
-      'ext_api_call',
-    );
+    emitOeItemResponse(ctx, {
+      itemType: 'ext_api_call',
+      serviceName: useCaseName,
+      method,
+      url,
+      requestPayload: buildExtApiEnvelope(ctx, {
+        url,
+        method,
+        downstreamService,
+        requestBody,
+        graphql,
+      }),
+      responsePayload: sanitisePayload(truncatedBody),
+      statusCode: status,
+      latencyMs,
+      success,
+      error,
+    });
   } catch {
     // Telemetry must never break outbound calls
   }
