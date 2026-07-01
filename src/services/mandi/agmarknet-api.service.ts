@@ -17,9 +17,14 @@ export class AgmarknetApiService {
   ).replace(/\/$/, "");
   private readonly accessName = process.env.AGMARKNET_ACCESS_NAME;
   private readonly password = process.env.AGMARKNET_PASSWORD;
+  /** Mandi-issued token — tried first; generate API only when this is rejected. */
+  private readonly seedToken =
+    process.env.MANDI_TOKEN || "7e78e809-a703-4e05-b441-dfefdc6ee1c4";
+  private readonly tokenTtlMs = 24 * 60 * 60 * 1000;
 
-  /** Cached token — reused across requests until Agmarknet rejects it. */
+  /** Cached token — reused across requests until expired or Agmarknet rejects it. */
   private cachedToken: string | null = null;
+  private tokenIssuedAt: number | null = null;
   private tokenRefreshPromise: Promise<string> | null = null;
 
   /** Serialize Agmarknet calls so concurrent requests do not race on token refresh. */
@@ -79,17 +84,40 @@ export class AgmarknetApiService {
       throw new Error("Agmarknet token response missing token field");
     }
     this.cachedToken = token;
+    this.tokenIssuedAt = Date.now();
     this.logger.log("MANDI Agmarknet token generated", logCtx);
     return token;
   }
 
   private invalidateToken(): void {
     this.cachedToken = null;
+    this.tokenIssuedAt = null;
   }
 
-  /** Return cached token, or fetch a new one. Concurrent callers share one refresh. */
+  private isTokenExpiredByTtl(): boolean {
+    if (!this.tokenIssuedAt) return false;
+    return Date.now() - this.tokenIssuedAt >= this.tokenTtlMs;
+  }
+
+  private markTokenValid(token: string): void {
+    this.cachedToken = token;
+    if (!this.tokenIssuedAt) {
+      this.tokenIssuedAt = Date.now();
+    }
+  }
+
+  /**
+   * Return cached/seed token without calling generate API.
+   * generate-dynamic-token runs only on forceRefresh or when no token is available.
+   */
   private async getToken(logCtx: string, forceRefresh = false): Promise<string> {
-    if (!forceRefresh && this.cachedToken) {
+    if (!forceRefresh && this.cachedToken && !this.isTokenExpiredByTtl()) {
+      return this.cachedToken;
+    }
+
+    if (!forceRefresh && !this.cachedToken && this.seedToken) {
+      this.cachedToken = this.seedToken;
+      this.logger.log("MANDI using configured Agmarknet token", logCtx);
       return this.cachedToken;
     }
 
@@ -127,6 +155,7 @@ export class AgmarknetApiService {
 
         try {
           const response = await axios.get(url, { timeout: 30000 });
+          this.markTokenValid(token);
           return response.data;
         } catch (err) {
           if (this.isNoDataResponse(err)) {
