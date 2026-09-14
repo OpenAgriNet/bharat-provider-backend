@@ -10,7 +10,7 @@ export class SathiService {
   constructor(
     private readonly configService: ConfigService,
     private readonly databaseService: DatabaseService,
-  ) {}
+  ) { }
 
   private getBaseUrl(): string {
     return (
@@ -95,7 +95,7 @@ export class SathiService {
     try {
       const response = await axios.request({
         method: "post",
-        url: `${baseUrl}/inv-apis/stock/getSeedAvailability`,
+        url: `${baseUrl}/inv-apis2/stock/getSeedAvailability`,
         headers: { "Content-Type": "application/json" },
         data: {
           cropCode,
