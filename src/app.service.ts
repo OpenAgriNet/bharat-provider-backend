@@ -784,8 +784,6 @@ export class AppService {
       let detectedType = type;
       if (/^[6-9]\d{9}$/.test(mobileNumber)) {
         detectedType = "Mobile";
-      } else if (mobileNumber.length == 12 && /^\d+$/.test(mobileNumber)) {
-        detectedType = "Aadhar";
       } else if (mobileNumber.length == 11) {
         detectedType = "Ben_id";
       } else {
@@ -938,24 +936,13 @@ export class AppService {
     try {
       // Auto-detect the type if not provided
       let detectedType = type;
-      // if (!detectedType) {
-      // Comment out other cases and keep only Ben_id
       if (/^[6-9]\d{9}$/.test(mobileNumber)) {
         detectedType = "Mobile";
-        // } else if (mobileNumber.length == 14 && /^[6-9]\d{9}$/.test(mobileNumber.substring(0, 10))) {
-        //   detectedType = "MobileAadhar";
-      } else if (mobileNumber.length == 12 && /^\d+$/.test(mobileNumber)) {
-        detectedType = "Aadhar";
       } else if (mobileNumber.length == 11) {
         detectedType = "Ben_id";
       } else {
-        // Default to Ben_id if format doesn't match any known pattern
         detectedType = "Ben_id";
       }
-
-      // Always use Ben_id
-      // detectedType = "Ben_id";
-      // }
 
       this.logger.log(
         `Detected type for verification | mobileNumber=${mobileNumber} detectedType=${detectedType}`,
@@ -2926,32 +2913,19 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
     let res;
     let type = "Ben_id";
 
-    // Comment out other cases and keep only Ben_id
     if (/^[6-9]\d{9}$/.test(userIdentifier)) {
       type = "Mobile";
       res = await this.getUserData(userIdentifier, "Mobile");
-      // } else if (
-      //   userIdentifier.length == 14 &&
-      //   /^[6-9]\d{9}$/.test(userIdentifier.substring(0, 10))
-      // ) {
-      //   type = "MobileAadhar";
-      //   res = await this.getUserData(userIdentifier, "MobileAadhar");
-    } else if (userIdentifier.length == 12 && /^\d+$/.test(userIdentifier)) {
-      type = "Aadhar";
-      res = await this.getUserData(userIdentifier, "Aadhar");
     } else if (userIdentifier.length == 11) {
       type = "Ben_id";
       res = await this.getUserData(userIdentifier, "Ben_id");
     } else {
       return Promise.reject(
         new Error(
-          "Please enter a valid Beneficiary ID/Aadhaar Number/Phone number",
+          "Please enter a valid Beneficiary ID/Phone number",
         ),
       );
     }
-
-    // Always use Ben_id
-    // res = await this.getUserData(userIdentifier, type);
 
     if (res.d.output.Message == "Unable to get user details") {
       // Instead of throwing an error, return a formatted error message
