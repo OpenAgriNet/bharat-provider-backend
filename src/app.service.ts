@@ -76,7 +76,7 @@ export class AppService {
     private readonly mandiService: MandiService,
     private readonly aifService: AifService,
     private readonly aifSessionStore: AifSessionStore,
-  ) {}
+  ) { }
 
   private nameSpace = process.env.HASURA_NAMESPACE;
   private base_url = process.env.BASE_URL;
@@ -1218,8 +1218,7 @@ export class AppService {
               current[key] === null
             ) {
               this.logger.warn(
-                `${field.message} for item ${
-                  data.id || data.computedID || "unknown"
+                `${field.message} for item ${data.id || data.computedID || "unknown"
                 } at index ${index}`,
               );
               return null;
@@ -1244,8 +1243,7 @@ export class AppService {
           .map((param: any) => {
             if (!param || !param.key || param.value === undefined) {
               this.logger.warn(
-                `Invalid parameter for item ${
-                  data.id || data.computedID || "unknown"
+                `Invalid parameter for item ${data.id || data.computedID || "unknown"
                 }: missing key or value`,
               );
               return null;
@@ -1253,9 +1251,8 @@ export class AppService {
             const value =
               param.value === "NA"
                 ? "Not available"
-                : `${param.value} ${param.unit || ""} (${
-                    param.rating || "Unknown"
-                  })`;
+                : `${param.value} ${param.unit || ""} (${param.rating || "Unknown"
+                })`;
             return {
               code: parameterMapping[param.key] || param.key.toLowerCase(),
               value,
@@ -1286,8 +1283,7 @@ export class AppService {
           .map((rec: any, recIndex: number) => {
             if (!rec || !rec.crop) {
               this.logger.warn(
-                `Skipping invalid fertilizer recommendation at index ${recIndex} for item ${
-                  data.id || data.computedID || "unknown"
+                `Skipping invalid fertilizer recommendation at index ${recIndex} for item ${data.id || data.computedID || "unknown"
                 }: missing or invalid crop`,
               );
               return null;
@@ -1303,8 +1299,7 @@ export class AppService {
                     !fert.bags
                   ) {
                     this.logger.warn(
-                      `Skipping invalid fertilizer at index ${fertIndex} for crop ${
-                        rec.crop
+                      `Skipping invalid fertilizer at index ${fertIndex} for crop ${rec.crop
                       } in item ${data.id || data.computedID || "unknown"}`,
                     );
                     return null;
@@ -1354,8 +1349,7 @@ export class AppService {
           .map((def: any, index: number) => {
             if (!def) {
               this.logger.warn(
-                `Skipping invalid deficiency at index ${index} for item ${
-                  data.id || data.computedID || "unknown"
+                `Skipping invalid deficiency at index ${index} for item ${data.id || data.computedID || "unknown"
                 }`,
               );
               return null;
@@ -1452,15 +1446,12 @@ export class AppService {
         return {
           id: data.computedID || data.id || "unknown",
           descriptor: {
-            name: `Soil Health Card for Farmer ${
-              data.farmer?.name || "Unknown"
-            }`,
+            name: `Soil Health Card for Farmer ${data.farmer?.name || "Unknown"
+              }`,
             short_desc: `${nutrientRatings}, crop recommendation: ${recommendedCrops}`,
-            long_desc: `Soil Health Card for ${
-              data.farmer?.name || "Unknown"
-            } in ${data.village?.name || "Unknown"}, ${
-              data.district?.name || "Unknown"
-            }. Nutrient Ratings: ${nutrientRatings}. Recommended crops: ${recommendedCrops}.`,
+            long_desc: `Soil Health Card for ${data.farmer?.name || "Unknown"
+              } in ${data.village?.name || "Unknown"}, ${data.district?.name || "Unknown"
+              }. Nutrient Ratings: ${nutrientRatings}. Recommended crops: ${recommendedCrops}.`,
           },
           media: [
             {
@@ -1642,51 +1633,41 @@ export class AppService {
         logCtx,
       );
 
-      // const storedData = this.tempOTPStore;
+      if (!regNumber) {
+        this.logger.warn("Missing registration number for OTP verification", logCtx);
+        return this.createStatusErrorResponse(
+          body.context,
+          "invalid_otp",
+          "Registration number is required to verify the OTP. Please try again.",
+        );
+      }
 
-      // if (!storedData?.mobileNumber) {
-      //   return this.createStatusErrorResponse(
-      //     body.context,
-      //     "invalid_otp",
-      //     "The OTP you entered is either incorrect, expired, or already used. Please request a new OTP and try again."
-      //   );
-      // }
+      // Verify OTP against the PM-KISAN ChatbotOTPVerified service (was previously
+      // bypassed, which let any 4-digit value pass as a valid OTP).
+      this.logger.log("Calling verifyOTP", logCtx);
+      const verifyResponse = await this.verifyOTP(
+        regNumber,
+        orderId,
+        undefined,
+        transactionId,
+      );
 
-      // TODO: comment for now implement OTP later
-      // Verify OTP
-      // this.logger.log("Calling verifyOTP", logCtx);
-      // const verifyResponse = await this.verifyOTP(
-      //   regNumber,
-      //   orderId,
-      //   undefined,
-      //   transactionId,
-      // );
+      if (verifyResponse.status !== "OK") {
+        this.logger.warn(
+          `OTP verification failed | status=${verifyResponse.status}`,
+          logCtx,
+        );
+        return this.createStatusErrorResponse(
+          body.context,
+          "invalid_otp",
+          "Invalid or expired OTP. Please try again.",
+        );
+      }
 
-      // if (verifyResponse.status !== "OK") {
-      //   this.logger.warn(
-      //     `OTP verification failed | status=${verifyResponse.status}`,
-      //     logCtx,
-      //   );
-      //   return this.createStatusErrorResponse(
-      //     body.context,
-      //     "invalid_otp",
-      //     "Invalid or expired OTP. Please try again.",
-      //   );
-      // }
-
-      // this.logger.log("OTP validation successful", logCtx);
-      this.logger.log("OTP verification skipped for PM-KISAN installment status", logCtx);
-      // Clear OTP after successful validation
-      // this.clearTempOTPStore();
+      this.logger.log("OTP validation successful", logCtx);
 
       // Fetch user data after successful OTP verification
       try {
-        // const context = {
-        //   userAadhaarNumber: storedData.identifier || storedData.mobileNumber,
-        //   lastAadhaarDigits: "",
-        //   queryType: "status",
-        // };
-
         const context = {
           userAadhaarNumber: regNumber || phoneNumber || "",
           lastAadhaarDigits: "",
@@ -2191,12 +2172,12 @@ export class AppService {
           list: [
             ...(session.beneficiaryName
               ? [
-                  {
-                    code: "beneficiary_name",
-                    name: "Beneficiary Name",
-                    value: session.beneficiaryName,
-                  },
-                ]
+                {
+                  code: "beneficiary_name",
+                  name: "Beneficiary Name",
+                  value: session.beneficiaryName,
+                },
+              ]
               : []),
             {
               code: "session_valid_for",
@@ -2721,7 +2702,7 @@ export class AppService {
           body.context,
           "otp_error",
           otpResponse.d?.output?.Message ||
-            "Failed to generate OTP. Please try again later.",
+          "Failed to generate OTP. Please try again later.",
         );
       }
     } catch (error) {
@@ -2841,11 +2822,10 @@ Registration Date - ${format(
       new Date(DateOfRegistration),
       "M/d/yyyy h:mm:ss a",
     )}
-Last Installment Status - ${
-      LatestInstallmentPaid == 0
+Last Installment Status - ${LatestInstallmentPaid == 0
         ? "No"
         : this.addOrdinalSuffix(LatestInstallmentPaid)
-    } Installment payment done
+      } Installment payment done
 eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
   }
 
@@ -3846,7 +3826,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       return buildError(
         "api_error",
         error.response?.data?.errors?.[0]?.message ||
-          `Failed to fetch GFR details: ${error.message}`,
+        `Failed to fetch GFR details: ${error.message}`,
       );
     }
 
@@ -4039,7 +4019,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       return buildError(
         "api_error",
         error.response?.data?.errors?.[0]?.message ||
-          `Failed to fetch soil health data: ${error.message}`,
+        `Failed to fetch soil health data: ${error.message}`,
       );
     }
 
@@ -4106,7 +4086,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       return buildError(
         "api_error",
         error.response?.data?.errors?.[0]?.message ||
-          `Failed to fetch recommendations: ${error.message}`,
+        `Failed to fetch recommendations: ${error.message}`,
       );
     }
 
