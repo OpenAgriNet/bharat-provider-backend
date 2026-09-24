@@ -37,6 +37,7 @@ import { QdrantClientService } from "./services/scheme-qdrant/qdrant.client";
 import { SchemeCatalogService } from "./services/scheme-qdrant/scheme-catalog.service";
 import { AifService } from "./services/aif/aif.service";
 import { AifSessionStore } from "./services/aif/aif-session.store";
+import { AgristackService } from "./services/agristack/agristack.service";
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { AifSessionStore } from "./services/aif/aif-session.store";
     SchemeQdrantService,
     AifService,
     AifSessionStore,
+    AgristackService,
   ],
 })
 export class AppModule {}

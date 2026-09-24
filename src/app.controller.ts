@@ -24,6 +24,7 @@ import { PmfbyGrievanceService } from "./services/pmfby/pmfby-greviance.service"
 import { SathiService } from "./services/sathi/sathi.service";
 import { SmamService } from "./services/smam/smam.service";
 import { SchemeQdrantService } from "./services/scheme-qdrant/scheme-qdrant.service";
+import { AgristackService } from "./services/agristack/agristack.service";
 import { LoggerService } from './services/logger/logger.service';
 
 @Controller("")
@@ -37,7 +38,8 @@ export class AppController {
     private readonly sathiSeedService: SathiService,
     private readonly smamService: SmamService,
     private readonly schemeQdrantService: SchemeQdrantService,
-    private readonly logger: LoggerService) {}
+    private readonly agristackService: AgristackService,
+    private readonly logger: LoggerService) { }
 
   @Get()
   getHello(): string {
@@ -155,13 +157,20 @@ export class AppController {
         this.logger.log("SMAM FINAL RESPONSE:", JSON.stringify(smamResult, null, 2));
         return smamResult;
       }
-      
+
       case "sathi-seed": {
         const sathiResult = await this.sathiSeedService.getSeedAvailability(body);
         this.logger.log("SATHI FINAL RESPONSE:", JSON.stringify(sathiResult, null, 2));
         return sathiResult;
       }
-      
+
+
+      case "agristack": {
+        this.logger.log("Inside AgriStack search");
+        const agristackResult = await this.agristackService.search(body);
+        this.logger.log("AGRISTACK FINAL RESPONSE:", JSON.stringify(agristackResult, null, 2));
+        return agristackResult;
+      }
 
       default:
         return this.appService.searchForIntentQuery(body);
@@ -230,6 +239,8 @@ export class AppController {
         return "sathi-seed";
       case providerId === "smam":
         return "smam";
+      case providerId === "agristack-agri":
+        return "agristack";
       default:
         return "unknown";
     }
@@ -244,23 +255,23 @@ export class AppController {
   @Post("mobility/init")
   async initCourse1(@Body() body: any) {
     this.logger.log("init api calling");
-  
+
     const providerId = body?.message?.order?.provider?.id?.toLowerCase() ?? "";
     const itemId = body?.message?.order?.items?.[0]?.id?.toLowerCase() ?? "";
-  
+
     this.logger.log(`[init] provider: ${providerId}, item: ${itemId}`);
-  
+
     switch (providerId) {
       case "pmkisan-greviance":
         this.logger.log("INSIDE PMKISAN GRIEVANCE INIT...");
         const grievanceResponse = await this.pmkisanGrievanceService.createGrievance(body);
         this.logger.log("PM Kisan Grievance Response:", JSON.stringify(grievanceResponse, null, 2));
         return grievanceResponse;
-  
+
       case "pmfby-grievance":
         this.logger.log("INSIDE PMFBY GRIEVANCE INIT...");
         return this.pmfbyGrievanceService.createGrievance(body);
-  
+
       case "pmfby-agri":
         this.logger.log("INSIDE PMFBY INIT...");
         return this.appService.handlePmfbyInit(body);
@@ -268,7 +279,7 @@ export class AppController {
       case "aif-agri":
         this.logger.log("INSIDE AIF INIT...");
         return this.appService.handleAifInit(body);
-  
+
       case "shc-discovery":
         this.logger.log("INSIDE SHC INIT...");
         try {
@@ -280,7 +291,7 @@ export class AppController {
             error.status || HttpStatus.INTERNAL_SERVER_ERROR,
           );
         }
-  
+
       default:
         if (body?.message?.order) {
           this.logger.log("INSIDE PMKISAN INIT...");

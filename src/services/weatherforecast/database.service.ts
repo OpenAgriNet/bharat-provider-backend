@@ -12,10 +12,25 @@ export interface CommodityRow {
   group_name: string | null;
 }
 
+export interface AgristackApiAuditRow {
+  log_label: string;
+  attempt: number;
+  service_id: string;
+  farmer_id?: string | null;
+  season?: string | null;
+  year?: string | null;
+  success: boolean;
+  http_status?: number | null;
+  error_message?: string | null;
+  request_payload: unknown;
+  response_payload?: unknown;
+}
+
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
   private pool: Pool;
+  private agristackAuditTableReady = false;
   /** Dedicated pool for mandi v2 commodity cache (MANDI_DB_*), falls back to main pool */
   private mandiPool: Pool;
 
@@ -37,16 +52,16 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     const sslEnabledFromMode = ["require", "verify-ca", "verify-full", "no-verify"].includes(sslMode);
     const sslEnabled = this.parseBoolean(
       process.env[`${prefix}_SSL`] ||
-        process.env[`${fallbackPrefix}_SSL`] ||
-        process.env.IMD_DB_SSL ||
-        process.env.DB_SSL,
+      process.env[`${fallbackPrefix}_SSL`] ||
+      process.env.IMD_DB_SSL ||
+      process.env.DB_SSL,
       sslEnabledFromMode,
     );
     const rejectUnauthorized = this.parseBoolean(
       process.env[`${prefix}_SSL_REJECT_UNAUTHORIZED`] ||
-        process.env[`${fallbackPrefix}_SSL_REJECT_UNAUTHORIZED`] ||
-        process.env.IMD_DB_SSL_REJECT_UNAUTHORIZED ||
-        process.env.DB_SSL_REJECT_UNAUTHORIZED,
+      process.env[`${fallbackPrefix}_SSL_REJECT_UNAUTHORIZED`] ||
+      process.env.IMD_DB_SSL_REJECT_UNAUTHORIZED ||
+      process.env.DB_SSL_REJECT_UNAUTHORIZED,
       false,
     );
 
@@ -58,10 +73,10 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         process.env.WEATHER_DB_HOST,
       port: parseInt(
         process.env[`${prefix}_PORT`] ||
-          process.env[`${fallbackPrefix}_PORT`] ||
-          process.env.IMD_DB_PORT ||
-          process.env.WEATHER_DB_PORT ||
-          "5432",
+        process.env[`${fallbackPrefix}_PORT`] ||
+        process.env.IMD_DB_PORT ||
+        process.env.WEATHER_DB_PORT ||
+        "5432",
       ),
       database:
         process.env[`${prefix}_NAME`] ||
@@ -394,6 +409,71 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     } finally {
       client.release();
     }
+  }
+
+  private async ensureAgristackAuditTable(tableName: string): Promise<void> {
+    if (this.agristackAuditTableReady) return;
+
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS ${tableName} (
+        id BIGSERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        log_label TEXT NOT NULL,
+        attempt INT NOT NULL,
+        service_id TEXT NOT NULL,
+        farmer_id TEXT,
+        season TEXT,
+        year TEXT,
+        success BOOLEAN NOT NULL,
+        http_status INT,
+        error_message TEXT,
+        request_payload JSONB NOT NULL,
+        response_payload JSONB
+      );
+      CREATE INDEX IF NOT EXISTS idx_agristack_audit_created_at ON ${tableName} (created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agristack_audit_farmer_id ON ${tableName} (farmer_id);
+      CREATE INDEX IF NOT EXISTS idx_agristack_audit_service_id ON ${tableName} (service_id);
+    `);
+
+    this.agristackAuditTableReady = true;
+  }
+
+  async insertAgristackApiAudit(record: AgristackApiAuditRow): Promise<void> {
+    const tableName = (process.env.AGRISTACK_AUDIT_TABLE || "agristack_api_audit").trim();
+    const isSafeName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(tableName);
+    if (!isSafeName) {
+      throw new Error(`Invalid AGRISTACK_AUDIT_TABLE value: ${tableName}`);
+    }
+
+    await this.ensureAgristackAuditTable(tableName);
+    await this.pool.query(
+      `INSERT INTO ${tableName} (
+        log_label,
+        attempt,
+        service_id,
+        farmer_id,
+        season,
+        year,
+        success,
+        http_status,
+        error_message,
+        request_payload,
+        response_payload
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb)`,
+      [
+        record.log_label,
+        record.attempt,
+        record.service_id,
+        record.farmer_id ?? null,
+        record.season ?? null,
+        record.year ?? null,
+        record.success,
+        record.http_status ?? null,
+        record.error_message ?? null,
+        JSON.stringify(record.request_payload ?? null),
+        JSON.stringify(record.response_payload ?? null),
+      ],
+    );
   }
 }
 
