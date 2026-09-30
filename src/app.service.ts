@@ -43,6 +43,12 @@ import {
   buildAifGrievanceResponse,
   buildAifResponse,
 } from "./services/aif/aif-response";
+import { KccService } from "./services/kcc/kcc.service";
+import { KccSessionStore } from "./services/kcc/kcc-session.store";
+import {
+  buildKccApplicationStatusResponse,
+  buildKccResponse,
+} from "./services/kcc/kcc-response";
 const file = fs.readFileSync("./course.json", "utf8");
 const courseData = JSON.parse(file);
 
@@ -76,6 +82,8 @@ export class AppService {
     private readonly mandiService: MandiService,
     private readonly aifService: AifService,
     private readonly aifSessionStore: AifSessionStore,
+    private readonly kccService: KccService,
+    private readonly kccSessionStore: KccSessionStore,
   ) { }
 
   private nameSpace = process.env.HASURA_NAMESPACE;
@@ -1052,6 +1060,12 @@ export class AppService {
       if (this.isAifRequest(body)) {
         this.logger.log("Routing to AIF status handler", logCtx);
         return await this.handleAifStatus(body);
+      }
+
+      // Like AIF, KCC status requests carry the OTP in tags rather than an order_id.
+      if (this.isKccRequest(body)) {
+        this.logger.log("Routing to KCC status handler", logCtx);
+        return await this.handleKccStatus(body);
       }
 
       const orderId = body.message?.order_id;
@@ -2306,6 +2320,198 @@ export class AppService {
       );
     } catch (err) {
       return this.buildAifError(body, "on_status", err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // KCC (Kisan Credit Card, via the Kisan Rin / Krishika portal) — application status
+  // ---------------------------------------------------------------------------
+
+  /** True when the request targets the KCC provider: provider kcc-agri, item kcc / kcc-status. */
+  private isKccRequest(body: any): boolean {
+    const providerId = String(
+      body?.message?.order?.provider?.id ?? "",
+    ).toLowerCase();
+    const itemId = String(
+      body?.message?.order?.items?.[0]?.id ?? "",
+    ).toLowerCase();
+    return (
+      providerId === "kcc-agri" || itemId === "kcc" || itemId === "kcc-status"
+    );
+  }
+
+  /** The KCC failure with the portal's own `error` text, under one `kcc_error` code. */
+  private buildKccError(
+    body: any,
+    action: "on_init" | "on_status",
+    err: unknown,
+  ) {
+    const message = String(
+      (err as Error)?.message ?? "KCC could not be reached.",
+    );
+
+    this.logger.error(
+      `KCC ${action} failed: ${message}`,
+      undefined,
+      `[kcc][txn:${body?.context?.transaction_id ?? "unknown"}]`,
+    );
+
+    return buildKccResponse(
+      body,
+      action,
+      { code: "kcc_error", name: "Error", short_desc: message },
+      { state: "FAILED" },
+    );
+  }
+
+  /** Accepts 10 digits with an optional +91 / 91 / 0 prefix; "" when it is not an Indian mobile. */
+  private getKccMobile(body: any): string {
+    const digits = String(this.getAifTagValue(body, "mobile_number") ?? "")
+      .replace(/[\s-]/g, "")
+      .replace(/^(\+?91|0)(?=\d{10}$)/, "");
+    return /^[6-9]\d{9}$/.test(digits) ? digits : "";
+  }
+
+  /**
+   * KCC /init — request_type get_otp. Sends the OTP and keeps the portal's requestID
+   * against transaction_id; the status call pairs it with the OTP.
+   */
+  public async handleKccInit(body: any) {
+    const transactionId = body?.context?.transaction_id;
+    const requestType = String(
+      this.getAifTagValue(body, "request_type") ?? "",
+    )
+      .toLowerCase()
+      .trim();
+
+    if (!transactionId) {
+      return buildKccResponse(body, "on_init", {
+        code: "missing_transaction_id",
+        name: "Missing Input",
+        short_desc:
+          "context.transaction_id is required, and must be identical across get_otp and the status call.",
+      });
+    }
+
+    if (requestType !== "get_otp") {
+      return buildKccResponse(body, "on_init", {
+        code: "invalid_request_type",
+        name: "Error",
+        short_desc: "request_type must be get_otp.",
+      });
+    }
+
+    const mobileNumber = this.getKccMobile(body);
+    if (!mobileNumber) {
+      return buildKccResponse(body, "on_init", {
+        code: "invalid_mobile_number",
+        name: "Missing Input",
+        short_desc:
+          "A 10-digit mobile number is required in fulfillment customer.person.tags.",
+      });
+    }
+
+    try {
+      const result = await this.kccService.requestOtp(mobileNumber);
+      this.kccSessionStore.prune();
+      this.kccSessionStore.set(transactionId, {
+        requestId: result.requestId,
+        mobileNumber,
+      });
+      return buildKccResponse(body, "on_init", {
+        code: "otp_sent",
+        name: "OTP Sent",
+        short_desc: result.message,
+        list: [
+          {
+            code: "masked_mobile",
+            name: "Mobile",
+            value: `XXXXXX${mobileNumber.slice(-4)}`,
+          },
+          ...(result.expiresIn
+            ? [{ code: "expires_in", name: "OTP Valid For", value: result.expiresIn }]
+            : []),
+        ],
+      });
+    } catch (err) {
+      return this.buildKccError(body, "on_init", err);
+    }
+  }
+
+  /**
+   * KCC /status — request_type application_status, carrying the OTP. The portal checks
+   * the OTP and returns the application in the same call.
+   */
+  private async handleKccStatus(body: any) {
+    const transactionId = body?.context?.transaction_id;
+    const requestType = String(
+      this.getAifTagValue(body, "request_type") ?? "",
+    )
+      .toLowerCase()
+      .trim();
+    const failed = (code: string, name: string, shortDesc: string) =>
+      buildKccResponse(
+        body,
+        "on_status",
+        { code, name, short_desc: shortDesc },
+        { state: "FAILED" },
+      );
+
+    if (!transactionId) {
+      return failed(
+        "missing_transaction_id",
+        "Missing Input",
+        "context.transaction_id is required, and must match the one used to send the OTP.",
+      );
+    }
+
+    if (requestType !== "application_status") {
+      return failed(
+        "invalid_request_type",
+        "Error",
+        "request_type must be application_status.",
+      );
+    }
+
+    const session = this.kccSessionStore.get(transactionId);
+    if (!session) {
+      return failed(
+        "session_expired",
+        "Error",
+        "There is no pending OTP for this transaction_id, or it has expired. A new OTP is needed.",
+      );
+    }
+
+    // A transaction is bound to the mobile the OTP went to; refuse a swap.
+    const requestedMobile = this.getKccMobile(body);
+    if (requestedMobile && requestedMobile !== session.mobileNumber) {
+      return failed(
+        "session_expired",
+        "Error",
+        "mobile_number does not match the number the OTP was sent to on this transaction_id.",
+      );
+    }
+
+    const otp = this.getAifNumericTag(body, "otp");
+    if (!otp) {
+      return failed(
+        "invalid_otp_format",
+        "Missing Input",
+        "A numeric OTP is required to fetch the KCC application status.",
+      );
+    }
+
+    try {
+      const status = await this.kccService.getApplicationStatus(
+        session.requestId,
+        otp,
+      );
+      // The OTP is spent; a later check starts with a fresh one. A wrong OTP leaves the
+      // session in place so the farmer can retry within the 15 minutes.
+      this.kccSessionStore.delete(transactionId);
+      return buildKccApplicationStatusResponse(body, status);
+    } catch (err) {
+      return this.buildKccError(body, "on_status", err);
     }
   }
 

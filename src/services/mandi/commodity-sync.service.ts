@@ -96,8 +96,10 @@ export class CommoditySyncService implements OnModuleInit {
         .filter((r) => r?.commodity_id != null && r?.commodity_name)
         .map((r) => ({
           commodity_id: Number(r.commodity_id),
-          commodity_name: String(r.commodity_name),
-          group_name: r.commodity_group_name ? String(r.commodity_group_name) : undefined,
+          // Master names carry stray whitespace ("Sweet Corn ", "...(Kantola)\n"), which
+          // breaks the exact-name lookup against the trimmed query.
+          commodity_name: String(r.commodity_name).trim(),
+          group_name: r.commodity_group_name ? String(r.commodity_group_name).trim() : undefined,
         }));
 
       await this.databaseService.replaceCommodityMaster(rows, trigger);

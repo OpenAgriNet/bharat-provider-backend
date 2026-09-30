@@ -7,6 +7,8 @@ import { AgmarknetApiService } from "./agmarknet-api.service";
 import { BecknContextService } from "./beckn-context.service";
 import { CatalogCompactService } from "./catalog-compact.service";
 import { CommodityResolverService } from "./commodity-resolver.service";
+import { classifyLocation, haversineKm } from "./location-match";
+import { MarketMasterService } from "./market-master.service";
 
 export interface AgmarknetVistaarParams {
   statecode: string;
@@ -28,6 +30,7 @@ export class MandiService {
     private readonly commodityResolver: CommodityResolverService,
     private readonly agmarknetApi: AgmarknetApiService,
     private readonly catalogCompact: CatalogCompactService,
+    private readonly marketMaster: MarketMasterService,
     private readonly logger: LoggerService,
   ) {}
 
@@ -150,10 +153,38 @@ export class MandiService {
         logCtx,
       );
 
+      // Agmarknet already widened its search (5 → 50 km) to the nearest mandi with
+      // data, so find out whether that mandi is the requested place or a substitute.
+      // The API doc lists market_latitude/longitude on each row but live responses
+      // omit them, so fall back to the market master for the mandi's coordinates.
+      const first = raw[0];
+      const rowLat = parseFloat(first?.market_latitude);
+      const rowLon = parseFloat(first?.market_longitude);
+      const coords = !first
+        ? null
+        : Number.isFinite(rowLat) && Number.isFinite(rowLon)
+          ? { lat: rowLat, lon: rowLon }
+          : await this.marketMaster.findCoordinates(
+              String(first.Market ?? "").trim(),
+              String(first.District ?? "").trim(),
+              String(first.State ?? "").trim(),
+              logCtx,
+            );
+      const match = classifyLocation(
+        raw,
+        intent.locationName,
+        coords ? haversineKm(intent.lat, intent.lon, coords.lat, coords.lon) : undefined,
+      );
+      this.logMandi(
+        body,
+        `MANDI location match status=${match.status} requested=${intent.locationName} market=${match.market ?? ""} district=${match.district ?? ""} distance_km=${match.distanceKm ?? ""}`,
+      );
+
       const catalog = this.catalogCompact.buildFromVistaarLocation(
         raw,
         intent,
         resolved.commodity,
+        match,
       );
       const itemCount =
         catalog.providers?.[0]?.items?.length ?? 0;

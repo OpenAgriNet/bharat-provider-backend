@@ -280,6 +280,10 @@ export class AppController {
         this.logger.log("INSIDE AIF INIT...");
         return this.appService.handleAifInit(body);
 
+      case "kcc-agri":
+        this.logger.log("INSIDE KCC INIT...");
+        return this.appService.handleKccInit(body);
+
       case "shc-discovery":
         this.logger.log("INSIDE SHC INIT...");
         try {

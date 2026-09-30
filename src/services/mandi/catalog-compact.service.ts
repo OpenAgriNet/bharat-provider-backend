@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { CommodityRow } from "../weatherforecast/database.service";
 import { MandiLocationIntent } from "./beckn-context.service";
+import { LocationMatchResult } from "./location-match";
 
 /** Beckn on_search catalog — same shape as legacy mandi v1 (MANDI_PRICE_FLOW.md). */
 export interface BecknMandiCatalog {
@@ -49,10 +50,11 @@ export class CatalogCompactService {
     itemId: number,
     defaults?: { state?: string; district?: string; market?: string; commodity?: string },
   ): any {
-    const commodity = String(rec?.Commodity ?? defaults?.commodity ?? "N/A");
-    const market = String(rec?.Market ?? defaults?.market ?? "N/A");
-    const district = String(rec?.District ?? defaults?.district ?? "N/A");
-    const state = String(rec?.State ?? defaults?.state ?? "N/A");
+    // Agmarknet pads names with trailing spaces ("APMC Pune ").
+    const commodity = String(rec?.Commodity ?? defaults?.commodity ?? "N/A").trim();
+    const market = String(rec?.Market ?? defaults?.market ?? "N/A").trim();
+    const district = String(rec?.District ?? defaults?.district ?? "N/A").trim();
+    const state = String(rec?.State ?? defaults?.state ?? "N/A").trim();
     const merged: Record<string, unknown> = {
       ...rec,
       Commodity: commodity,
@@ -181,22 +183,46 @@ export class CatalogCompactService {
     };
   }
 
-  /** Mandi v2: vistaar-location raw rows → standard Beckn catalog. */
+  /**
+   * Mandi v2: vistaar-location raw rows → standard Beckn catalog, tagged with
+   * whether the rows are for the requested place, a nearby substitute, or absent.
+   */
   buildFromVistaarLocation(
     raw: any[],
     intent: MandiLocationIntent,
-    _commodity: CommodityRow,
+    commodity: CommodityRow,
+    match: LocationMatchResult,
     limit = 10,
   ): BecknMandiCatalog {
     // A range asks "how did the price move", so give one row per date. A single
     // date asks "what is the price near me", so keep every market for that date.
-    return this.buildCatalogFromRecords(
+    const catalog = this.buildCatalogFromRecords(
       raw,
       intent.lat,
       intent.lon,
       limit,
       false,
     );
+    const context: Record<string, string> = {
+      status: match.status,
+      commodity: commodity.commodity_name,
+      requested_location: intent.locationName,
+    };
+    if (match.market) context.market = match.market;
+    if (match.district) context.district = match.district;
+    if (match.state) context.state = match.state;
+    if (match.distanceKm != null) context.distance_km = String(match.distanceKm);
+    return { ...catalog, tags: [this.searchContextTag(context)] };
+  }
+
+  private searchContextTag(context: Record<string, string>) {
+    return {
+      descriptor: { code: "search-context", name: "Search Context" },
+      list: Object.entries(context).map(([code, value]) => ({
+        descriptor: { code },
+        value,
+      })),
+    };
   }
 
   emptyCatalog(): BecknMandiCatalog {
@@ -211,24 +237,10 @@ export class CatalogCompactService {
     message: string,
     extra: Record<string, string> = {},
   ): BecknMandiCatalog {
-    const list = [
-      { descriptor: { code: "status" }, value: status },
-      { descriptor: { code: "message" }, value: message },
-      ...Object.entries(extra).map(([code, value]) => ({
-        descriptor: { code },
-        value,
-      })),
-    ];
-
     return {
       descriptor: { name: CatalogCompactService.CATALOG_NAME },
       providers: [],
-      tags: [
-        {
-          descriptor: { code: "search-context", name: "Search Context" },
-          list,
-        },
-      ],
+      tags: [this.searchContextTag({ status, message, ...extra })],
     };
   }
 

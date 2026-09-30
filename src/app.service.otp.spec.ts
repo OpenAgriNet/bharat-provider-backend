@@ -25,6 +25,8 @@ describe("AppService.handleOtpValidation (PM-KISAN OTP verification)", () => {
             stub,
             stub,
             stub,
+            stub,
+            stub,
         );
     });
 

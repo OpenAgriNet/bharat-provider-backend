@@ -61,6 +61,7 @@ const ROUTE_TO_SERVICE: Record<string, string> = {
   'sathi-seed': 'sathi',
   'shc-discovery': 'shc',
   'aif-agri': 'aif',
+  'kcc-agri': 'kcc',
 };
 
 const ROUTE_NAME_BY_SERVICE: Record<string, string> = {
@@ -76,6 +77,7 @@ const ROUTE_NAME_BY_SERVICE: Record<string, string> = {
   sathi: 'sathi-seed',
   shc: 'shc-discovery',
   aif: 'aif-agri',
+  kcc: 'kcc-agri',
   'grievance-agri': 'grievance-agri',
   'pmkisan-greviance': 'pmkisan-greviance',
   'pmkisan-installment-status': 'pmkisan-installment-status',
@@ -273,6 +275,8 @@ function resolveMobilityRoute(body: BecknBody): string {
       return 'shc-discovery';
     case providerId === 'aif-agri':
       return 'aif-agri';
+    case providerId === 'kcc-agri':
+      return 'kcc-agri';
     default:
       return 'unknown';
   }

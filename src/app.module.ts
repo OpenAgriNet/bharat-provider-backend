@@ -27,6 +27,7 @@ import { BecknContextService } from "./services/mandi/beckn-context.service";
 import { CatalogCompactService } from "./services/mandi/catalog-compact.service";
 import { CommodityResolverService } from "./services/mandi/commodity-resolver.service";
 import { CommoditySyncService } from "./services/mandi/commodity-sync.service";
+import { MarketMasterService } from "./services/mandi/market-master.service";
 import { GfrService } from "./services/gfr/gfr.service";
 import { PmkisanGrievanceService } from "./services/pmkisan-grievance/pmkisan-grievance.service";
 import { SathiService } from "./services/sathi/sathi.service";
@@ -37,6 +38,8 @@ import { QdrantClientService } from "./services/scheme-qdrant/qdrant.client";
 import { SchemeCatalogService } from "./services/scheme-qdrant/scheme-catalog.service";
 import { AifService } from "./services/aif/aif.service";
 import { AifSessionStore } from "./services/aif/aif-session.store";
+import { KccService } from "./services/kcc/kcc.service";
+import { KccSessionStore } from "./services/kcc/kcc-session.store";
 import { AgristackService } from "./services/agristack/agristack.service";
 
 @Module({
@@ -76,6 +79,7 @@ import { AgristackService } from "./services/agristack/agristack.service";
     CatalogCompactService,
     CommodityResolverService,
     CommoditySyncService,
+    MarketMasterService,
     GfrService,
     PmkisanGrievanceService,
     PmfbyGrievanceService,
@@ -87,6 +91,8 @@ import { AgristackService } from "./services/agristack/agristack.service";
     SchemeQdrantService,
     AifService,
     AifSessionStore,
+    KccService,
+    KccSessionStore,
     AgristackService,
   ],
 })
