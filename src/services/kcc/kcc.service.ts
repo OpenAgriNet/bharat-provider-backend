@@ -250,18 +250,32 @@ export class KccService {
   }
 
   /**
-   * Step 2 — the OTP and the requestID from step 1 fetch the application in one call;
-   * there is no separate verify endpoint. The OTP is never logged.
+   * Step 2 — the OTP and the requestID from step 1 fetch the farmer's applications in
+   * one call; there is no separate verify endpoint. The OTP is never logged.
+   *
+   * The documented sample returns one application object; a farmer with several gets
+   * an array (or an object wrapping `applications`). All shapes map to a list.
    */
-  async getApplicationStatus(
+  async getApplications(
     requestId: string,
     otp: string
-  ): Promise<KccApplicationStatus> {
+  ): Promise<KccApplicationStatus[]> {
     const data = await this.call(
       "/bharatVistaar/krishika/applicationStatus",
       { requestID: requestId, otp: Number(otp) }
     );
 
+    const records = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.applications)
+        ? data.applications
+        : data
+          ? [data]
+          : [];
+    return records.map((record: any) => this.mapApplication(record));
+  }
+
+  private mapApplication(data: any): KccApplicationStatus {
     const str = (value: any) =>
       value === null || value === undefined || value === "" ? null : String(value);
     const num = (value: any) =>

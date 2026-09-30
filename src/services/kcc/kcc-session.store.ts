@@ -1,16 +1,23 @@
 import { Injectable } from "@nestjs/common";
+import { KccApplicationStatus } from "./kcc.service";
 
 export interface KccSession {
   /** requestID returned with the OTP; paired with the OTP on the status call. */
   requestId: string;
   mobileNumber: string;
-  /** Epoch ms after which the OTP has expired upstream. */
+  /**
+   * Set once the OTP has been accepted. The OTP is then spent, so a farmer with several
+   * applications picks one from this list rather than being sent a new OTP.
+   */
+  applications?: KccApplicationStatus[];
+  /** Epoch ms after which the session is discarded. */
   expiresAt: number;
 }
 
 /**
- * Holds pending KCC OTP requests keyed by context.transaction_id, so the status call
- * that follows only needs to carry the OTP — the requestID never leaves the provider.
+ * Holds KCC sessions keyed by context.transaction_id: first the pending OTP request (so
+ * the status call only needs the OTP — the requestID never leaves the provider), then
+ * the applications that OTP fetched.
  *
  * In-memory, like AifSessionStore: lost on restart (the farmer is asked for a fresh
  * OTP) and not shared across instances. Move onto Redis before scaling out.
@@ -25,6 +32,17 @@ export class KccSessionStore {
   set(transactionId: string, session: Omit<KccSession, "expiresAt">) {
     this.sessions.set(transactionId, {
       ...session,
+      expiresAt: Date.now() + KccSessionStore.OTP_LIFETIME_MS,
+    });
+  }
+
+  /** Stores the fetched applications and keeps them for another OTP lifetime. */
+  setApplications(transactionId: string, applications: KccApplicationStatus[]) {
+    const session = this.sessions.get(transactionId);
+    if (!session) return;
+    this.sessions.set(transactionId, {
+      ...session,
+      applications,
       expiresAt: Date.now() + KccSessionStore.OTP_LIFETIME_MS,
     });
   }

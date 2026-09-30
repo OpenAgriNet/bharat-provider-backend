@@ -1,4 +1,8 @@
-import { buildKccApplicationStatusResponse, buildKccResponse } from "./kcc-response";
+import {
+  buildKccApplicationListResponse,
+  buildKccApplicationStatusResponse,
+  buildKccResponse,
+} from "./kcc-response";
 import { KccApplicationStatus } from "./kcc.service";
 
 const body = {
@@ -128,5 +132,22 @@ describe("buildKccApplicationStatusResponse", () => {
     const res = buildKccApplicationStatusResponse(body, rejectedDraft);
 
     expect(JSON.stringify(res)).not.toContain("741656");
+  });
+});
+
+describe("buildKccApplicationListResponse", () => {
+  it("lists each application for the farmer to choose from", () => {
+    const res = buildKccApplicationListResponse(body, [
+      rejectedDraft,
+      { ...rejectedDraft, applicationNo: "26000000271", applicationCurrentStatus: "APPROVED" },
+    ]);
+
+    expect(res.message.order.tags[0].descriptor.code).toBe("multiple_applications");
+    expect(
+      res.message.order.items.map((item: any) => listValues(item.tags[0]))
+    ).toEqual([
+      expect.objectContaining({ application_no: "26000170989", status: "DRAFT" }),
+      expect.objectContaining({ application_no: "26000000271", status: "APPROVED" }),
+    ]);
   });
 });

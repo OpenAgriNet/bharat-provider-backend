@@ -173,3 +173,47 @@ export function buildKccApplicationStatusResponse(
     { items: [...history, ...crops, ...animals] }
   );
 }
+
+/**
+ * More than one application on the mobile: list them so the farmer can pick one. The
+ * details follow on a second status call carrying application_no, served from the
+ * session because the OTP is already spent.
+ */
+export function buildKccApplicationListResponse(
+  body: any,
+  applications: KccApplicationStatus[]
+) {
+  const itemId = body?.message?.order?.items?.[0]?.id ?? "kcc-status";
+
+  const items = applications.map((application, index) => ({
+    id: `${itemId}-application-${index + 1}`,
+    tags: [
+      toBecknTag({
+        code: "application_summary",
+        name: "KCC Application",
+        short_desc: application.applicationNo,
+        list: present([
+          { code: "application_no", name: "Application Number", value: application.applicationNo },
+          { code: "status", name: "Status", value: application.applicationCurrentStatus },
+          { code: "required_loan_amount", name: "Loan Amount Applied", value: text(application.requiredLoanAmount) },
+          { code: "updated_at", name: "Last Updated", value: application.updatedAt },
+        ]),
+      }),
+    ],
+  }));
+
+  return buildKccResponse(
+    body,
+    "on_status",
+    {
+      code: "multiple_applications",
+      name: "KCC Applications",
+      short_desc: `${applications.length} KCC applications found. Select one application number.`,
+      list: [
+        { code: "application_count", name: "Application Count", value: String(applications.length) },
+        { code: "source", name: "Source", value: "Kisan Rin Portal" },
+      ],
+    },
+    { items }
+  );
+}

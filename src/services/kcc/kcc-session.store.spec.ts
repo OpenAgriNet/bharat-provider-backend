@@ -28,6 +28,22 @@ describe("KccSessionStore", () => {
     expect(store.get("txn-1")).toBeUndefined();
   });
 
+  it("keeps fetched applications for another OTP lifetime", () => {
+    store.set("txn-1", session);
+    jest.advanceTimersByTime(KccSessionStore.OTP_LIFETIME_MS - 1000);
+
+    store.setApplications("txn-1", [{ applicationNo: "1" } as any]);
+    jest.advanceTimersByTime(KccSessionStore.OTP_LIFETIME_MS - 1000);
+
+    expect(store.get("txn-1")?.applications).toEqual([{ applicationNo: "1" }]);
+  });
+
+  it("ignores applications for an unknown transaction", () => {
+    store.setApplications("nope", []);
+
+    expect(store.get("nope")).toBeUndefined();
+  });
+
   it("forgets a session on delete", () => {
     store.set("txn-1", session);
     store.delete("txn-1");

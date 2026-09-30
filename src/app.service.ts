@@ -43,9 +43,13 @@ import {
   buildAifGrievanceResponse,
   buildAifResponse,
 } from "./services/aif/aif-response";
-import { KccService } from "./services/kcc/kcc.service";
+import {
+  KccApplicationStatus,
+  KccService,
+} from "./services/kcc/kcc.service";
 import { KccSessionStore } from "./services/kcc/kcc-session.store";
 import {
+  buildKccApplicationListResponse,
   buildKccApplicationStatusResponse,
   buildKccResponse,
 } from "./services/kcc/kcc-response";
@@ -2439,8 +2443,9 @@ export class AppService {
   }
 
   /**
-   * KCC /status — request_type application_status, carrying the OTP. The portal checks
-   * the OTP and returns the application in the same call.
+   * KCC /status — request_type application_status. The first call carries the OTP; the
+   * portal checks it and returns the applications in the same call. A follow-up call
+   * carrying application_no picks one of several from the session, with no new OTP.
    */
   private async handleKccStatus(body: any) {
     const transactionId = body?.context?.transaction_id;
@@ -2492,6 +2497,16 @@ export class AppService {
       );
     }
 
+    // Once the OTP has been accepted the applications are cached: answer from them
+    // (a farmer picking one of several) instead of re-sending the spent OTP.
+    if (session.applications) {
+      return this.respondWithKccApplications(
+        body,
+        session.applications,
+        this.getAifNumericTag(body, "application_no"),
+      );
+    }
+
     const otp = this.getAifNumericTag(body, "otp");
     if (!otp) {
       return failed(
@@ -2502,17 +2517,52 @@ export class AppService {
     }
 
     try {
-      const status = await this.kccService.getApplicationStatus(
+      // A wrong OTP throws here and leaves the session untouched, so the farmer can
+      // retry within the 15 minutes.
+      const applications = await this.kccService.getApplications(
         session.requestId,
         otp,
       );
-      // The OTP is spent; a later check starts with a fresh one. A wrong OTP leaves the
-      // session in place so the farmer can retry within the 15 minutes.
-      this.kccSessionStore.delete(transactionId);
-      return buildKccApplicationStatusResponse(body, status);
+      this.kccSessionStore.setApplications(transactionId, applications);
+      return this.respondWithKccApplications(
+        body,
+        applications,
+        this.getAifNumericTag(body, "application_no"),
+      );
     } catch (err) {
       return this.buildKccError(body, "on_status", err);
     }
+  }
+
+  /**
+   * One application → its details. Several → the list to choose from, unless
+   * application_no names one of them.
+   */
+  private respondWithKccApplications(
+    body: any,
+    applications: KccApplicationStatus[],
+    applicationNo: string,
+  ) {
+    if (!applications.length) {
+      return buildKccResponse(body, "on_status", {
+        code: "no_applications",
+        name: "KCC Applications",
+        short_desc: "No KCC application was found for this mobile number.",
+        list: [{ code: "source", name: "Source", value: "Kisan Rin Portal" }],
+      });
+    }
+
+    if (applicationNo) {
+      const match = applications.find((a) => a.applicationNo === applicationNo);
+      if (match) return buildKccApplicationStatusResponse(body, match);
+      if (applications.length > 1) {
+        return buildKccApplicationListResponse(body, applications);
+      }
+    }
+
+    return applications.length === 1
+      ? buildKccApplicationStatusResponse(body, applications[0])
+      : buildKccApplicationListResponse(body, applications);
   }
 
   private clearTempOTPStore() {

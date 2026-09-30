@@ -151,12 +151,14 @@ describe("KccService", () => {
     });
   });
 
-  describe("getApplicationStatus", () => {
+  describe("getApplications", () => {
     it("sends requestID and a numeric OTP, and maps the decrypted application", async () => {
       mockedAxios.request.mockResolvedValueOnce(TOKEN_RESPONSE as any).mockResolvedValue(encrypted(APPLICATION_STATUS) as any);
 
-      const status = await service.getApplicationStatus("req-1", "741656");
+      const applications = await service.getApplications("req-1", "741656");
 
+      expect(applications).toHaveLength(1);
+      const [status] = applications;
       const config = mockedAxios.request.mock.calls[1][0] as any;
       expect(config.url).toBe(
         "https://kcc.test/kccintegration/bharatVistaar/krishika/applicationStatus"
@@ -186,11 +188,37 @@ describe("KccService", () => {
         }) as any
       );
 
-      const status = await service.getApplicationStatus("req-1", "741656");
+      const [status] = await service.getApplications("req-1", "741656");
 
       expect(status.applicationStatusHistory).toEqual([]);
       expect(status.cropHusbandryDetails).toEqual([]);
       expect(status.animalHusbandryDetails).toEqual([]);
+    });
+
+    it("returns every application when the portal sends an array", async () => {
+      mockedAxios.request.mockResolvedValueOnce(TOKEN_RESPONSE as any).mockResolvedValue(
+        encrypted([
+          APPLICATION_STATUS,
+          { ...APPLICATION_STATUS, applicationNo: "26000170989", applicationCurrentStatus: "DRAFT" },
+        ]) as any
+      );
+
+      const applications = await service.getApplications("req-1", "741656");
+
+      expect(applications.map((a) => a.applicationNo)).toEqual([
+        "26000000271",
+        "26000170989",
+      ]);
+    });
+
+    it("unwraps an object carrying an applications array", async () => {
+      mockedAxios.request.mockResolvedValueOnce(TOKEN_RESPONSE as any).mockResolvedValue(
+        encrypted({ applications: [APPLICATION_STATUS] }) as any
+      );
+
+      const applications = await service.getApplications("req-1", "741656");
+
+      expect(applications.map((a) => a.applicationNo)).toEqual(["26000000271"]);
     });
   });
 
