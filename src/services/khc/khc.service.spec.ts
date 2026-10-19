@@ -439,6 +439,36 @@ describe("KhcService", () => {
     ]);
   });
 
+  it.each(["uttarpradesh", " UTTAR  PRADESH ", "uttar\tpradesh"])(
+    "matches state spacing and case variations: %s",
+    async (name) => {
+      const state = { stateid: 9, statename: "Uttar Pradesh" };
+      http.request.mockResolvedValueOnce({
+        data: {
+          status: "200 OK",
+          data: [state, { stateid: 10, statename: "Bihar" }],
+        },
+      });
+      await expect(service.getReference("states", undefined, name)).resolves.toEqual({
+        options: [state], total: 1, page: 1,
+      });
+    }
+  );
+
+  it("preserves ambiguous name matches and original reference rows", async () => {
+    const rows = [
+      { villageid: 1, villagename: "Abu Pur" },
+      { villageid: 2, villagename: "Abupur Kalan" },
+      { villageid: 3, villagename: "Other Village" },
+    ];
+    http.request.mockResolvedValueOnce({
+      data: { status: "200 OK", data: rows },
+    });
+    await expect(service.getReference("villages", 1067, "abupur")).resolves.toEqual({
+      options: rows.slice(0, 2), total: 2, page: 1,
+    });
+  });
+
   it.each(["invalid", "__proto__"])(
     "rejects unrecognized reference %s",
     async (kind) => {

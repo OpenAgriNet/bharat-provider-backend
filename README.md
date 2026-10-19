@@ -120,6 +120,10 @@ Reference types: `states`; `districts` (parent state); `sub-districts` (district
 results can be filtered by name and are paged locally, 50 rows per page. No example
 IDs are used as defaults. Upstream requests are not automatically retried.
 
+Name filtering uses case-insensitive, whitespace-insensitive substring matching:
+`uttarpradesh` matches `Uttar Pradesh`. Original names/IDs and all ambiguous
+matches are preserved; no fuzzy spelling correction or ID guessing is used.
+
 The chat tool derives a stable `externalReferenceNo` from the conversation and
 confirmed grievance fields. Per the KHC guide, resending the same reference returns
 the existing grievance instead of creating another. After a timeout or malformed

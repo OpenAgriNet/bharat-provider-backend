@@ -355,11 +355,13 @@ export class KhcService {
     ) {
       throw new KhcError("KHC returned an invalid reference list.");
     }
-    const needle = name.trim().toLocaleLowerCase();
+    const normalizeName = (value: string) =>
+      value.toLocaleLowerCase().replace(/\s+/g, "");
+    const needle = normalizeName(name);
     const matches = data.filter(
       (row) =>
         !needle ||
-        String(row[reference.name]).toLocaleLowerCase().includes(needle)
+        normalizeName(String(row[reference.name])).includes(needle)
     );
     return {
       options: matches.slice((pageNumber - 1) * 50, pageNumber * 50),
