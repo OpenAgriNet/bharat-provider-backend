@@ -61,6 +61,8 @@ const ROUTE_TO_SERVICE: Record<string, string> = {
   'sathi-seed': 'sathi',
   'shc-discovery': 'shc',
   'aif-agri': 'aif',
+  'agristack-agri': 'agristack',
+  'khc-agri': 'khc',
 };
 
 const ROUTE_NAME_BY_SERVICE: Record<string, string> = {
@@ -76,6 +78,8 @@ const ROUTE_NAME_BY_SERVICE: Record<string, string> = {
   sathi: 'sathi-seed',
   shc: 'shc-discovery',
   aif: 'aif-agri',
+  agristack: 'agristack-agri',
+  khc: 'khc-agri',
   'grievance-agri': 'grievance-agri',
   'pmkisan-greviance': 'pmkisan-greviance',
   'pmkisan-installment-status': 'pmkisan-installment-status',
@@ -273,6 +277,10 @@ function resolveMobilityRoute(body: BecknBody): string {
       return 'shc-discovery';
     case providerId === 'aif-agri':
       return 'aif-agri';
+    case providerId === 'agristack-agri':
+      return 'agristack-agri';
+    case providerId === 'khc-agri':
+      return 'khc-agri';
     default:
       return 'unknown';
   }
@@ -359,6 +367,8 @@ export function resolveExternalServiceName(url?: string): string {
     return 'smam';
   }
   if (normalized.includes('agriinfra')) return 'aif';
+  if (normalized.includes('agristack')) return 'agristack';
+  if (normalized.includes('/khc/')) return 'khc';
 
   return 'external';
 }

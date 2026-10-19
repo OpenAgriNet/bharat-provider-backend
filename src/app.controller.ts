@@ -25,6 +25,7 @@ import { SathiService } from "./services/sathi/sathi.service";
 import { SmamService } from "./services/smam/smam.service";
 import { SchemeQdrantService } from "./services/scheme-qdrant/scheme-qdrant.service";
 import { AgristackService } from "./services/agristack/agristack.service";
+import { KhcService } from "./services/khc/khc.service";
 import { LoggerService } from './services/logger/logger.service';
 
 @Controller("")
@@ -39,7 +40,8 @@ export class AppController {
     private readonly smamService: SmamService,
     private readonly schemeQdrantService: SchemeQdrantService,
     private readonly agristackService: AgristackService,
-    private readonly logger: LoggerService) { }
+    private readonly logger: LoggerService,
+    private readonly khcService: KhcService) { }
 
   @Get()
   getHello(): string {
@@ -262,6 +264,9 @@ export class AppController {
     this.logger.log(`[init] provider: ${providerId}, item: ${itemId}`);
 
     switch (providerId) {
+      case "khc-agri":
+        return this.khcService.handle(body, "on_init");
+
       case "pmkisan-greviance":
         this.logger.log("INSIDE PMKISAN GRIEVANCE INIT...");
         const grievanceResponse = await this.pmkisanGrievanceService.createGrievance(body);
@@ -317,6 +322,9 @@ export class AppController {
   async handleStatus(@Body() body: any) {
     this.logger.log("status api calling");
 
+    if (body?.message?.order?.provider?.id?.toLowerCase() === "khc-agri") {
+      return this.khcService.handle(body, "on_status");
+    }
     return this.appService.handleStatus(body);
   }
 
