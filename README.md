@@ -73,6 +73,41 @@ This service includes the following API integrations:
 - **Weather Forecast** - Get weather forecast data from IMD (Indian Meteorological Department) based on GPS coordinates
 - **Grievance** - Handle and process grievance-related requests
 
+### AgriStack synchronous DPE gateway
+
+Categories A/B/C use `https://ufsi.agristack.gov.in/gateway/seek`. Beckn search item
+tags must include `farmerId` and `stateLgdCode` from the consented login callback;
+B/C also require `season` and `year`. The provider sends the state as
+`X-State-LGD-Code` and sends exactly `frCentralId` (A) or
+`frCentralId`, `season`, `year` (B/C) in `query_param`.
+
+Configure these environment variables:
+
+- `AGRISTACK_USERNAME`, `AGRISTACK_PASSWORD`: onboarded token credentials.
+- `AGRISTACK_SENDER_ID`: onboarded AIU identifier.
+- `AGRISTACK_PRIVATE_KEY_PATH`: path to a securely mounted RSA private-key PEM.
+  Defaults to `private_key.pem` relative to the server working directory.
+  Containers must mount the file at runtime; key files are excluded from the
+  Docker build context.
+- Optional overrides: `AGRISTACK_TOKEN_URL`, `AGRISTACK_CLIENT_ID`,
+  `AGRISTACK_SEEK_URL`, `AGRISTACK_RECEIVER_ID`, `AGRISTACK_SIGNATURE`,
+  `AGRISTACK_SERVICE_ID_CATEGORY_A`, `AGRISTACK_SERVICE_ID_CATEGORY_B`,
+  `AGRISTACK_SERVICE_ID_CATEGORY_C`. Receiver ID and signature default to empty.
+  Remove any old state-specific `AGRISTACK_SEEK_URL` override when migrating.
+
+Register the **matching** RSA public key (X.509 SubjectPublicKeyInfo, at least
+2048 bits) against the sender ID with AgriStack. The public key is used upstream
+to encrypt, not locally to decrypt. Keep the private key server-side, restrict its
+file permissions, and never commit key files. The provider unwraps `encrypted_key`
+with RSA-OAEP/SHA-256, then decrypts `encrypted_data` with AES-256-GCM and verifies
+`auth_tag` before parsing the returned array. Unsupported encryption, malformed
+payloads, missing/wrong keys and authentication failures return an error catalog;
+they do not return a success-shaped empty result. Audits retain encrypted response
+envelopes rather than decrypted farmer records.
+
+Run focused tests:
+`npm test -- --runInBand --runTestsByPath src/services/agristack/agristack.service.spec.ts`.
+
 Steps to install this app.
 
 1. Git clone https://github.com/tekdi/icar-provider-service.git
@@ -100,4 +135,3 @@ Then edit `.env` file with your actual configuration values. See `.env.example` 
 - Email Service Configuration
 
 7. Restart the server: npm run start
-

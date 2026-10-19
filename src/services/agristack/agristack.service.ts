@@ -1,12 +1,18 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios from "axios";
-import { randomUUID } from "crypto";
+import { constants, createDecipheriv, createPrivateKey, privateDecrypt, randomUUID } from "crypto";
+import { readFileSync } from "fs";
 import { DatabaseService } from "../weatherforecast/database.service";
 
 interface AgristackTokenResponse {
   access_token: string;
   expires_in?: number;
+}
+
+interface AgristackSeekResponse {
+  header?: { status?: string; completed_count?: number; is_msg_encrypted?: boolean };
+  message?: Record<string, unknown>;
 }
 
 @Injectable()
@@ -36,7 +42,7 @@ export class AgristackService {
         log_label: params.logLabel,
         attempt: params.attempt,
         service_id: params.serviceId,
-        farmer_id: params.queryParam.farmerId ?? null,
+        farmer_id: params.queryParam.frCentralId ?? null,
         season: params.queryParam.season ?? null,
         year: params.queryParam.year ?? null,
         success: params.success,
@@ -61,7 +67,7 @@ export class AgristackService {
   private getSeekUrl(): string {
     return this.getEnv(
       "AGRISTACK_SEEK_URL",
-      "https://cgde.agristack.gov.in/agristack-data-provisioning-engine/v1/api/assetIdentification/seek",
+      "https://ufsi.agristack.gov.in/gateway/seek",
     );
   }
 
@@ -70,12 +76,11 @@ export class AgristackService {
   }
 
   private getReceiverId(): string {
-    return this.getEnv("AGRISTACK_RECEIVER_ID", "3e5037bf-17f0-49bb-99ec-0d90a4ead7da");
+    return this.getEnv("AGRISTACK_RECEIVER_ID");
   }
 
   private getSignature(): string {
-    // ponytail: static demo signature per AgriStack sandbox guide; replace with real Beckn signing before prod
-    return this.getEnv("AGRISTACK_SIGNATURE", "demo-signature-abc");
+    return this.getEnv("AGRISTACK_SIGNATURE");
   }
 
   /** Reads a flat tag value by code from item.tags (same convention as SathiService). */
@@ -148,19 +153,87 @@ export class AgristackService {
           service_id: serviceId,
           query_param: queryParam,
         },
-        consent: {
-          consent_required: false,
-          consent_artifact: {},
-        },
       },
     };
+  }
+
+  private decryptSeekResponse(response: AgristackSeekResponse): Record<string, unknown>[] {
+    if (response?.header?.status !== "succeed") {
+      throw new Error("AgriStack gateway returned an unsuccessful response");
+    }
+    if (response.header.completed_count === 0 && response.header.is_msg_encrypted === false) {
+      return [];
+    }
+    const message = response.message;
+    if (response.header.is_msg_encrypted !== true ||
+      message?.encryption_alg !== "AES-256-GCM+RSA-OAEP-SHA256") {
+      throw new Error("AgriStack response encryption is missing or unsupported");
+    }
+
+    const decode = (field: string): Buffer => {
+      const value = message[field];
+      if (typeof value !== "string" || !value || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+        throw new Error(`AgriStack response has invalid ${field}`);
+      }
+      const decoded = Buffer.from(value, "base64");
+      if (decoded.toString("base64") !== value) {
+        throw new Error(`AgriStack response has invalid ${field}`);
+      }
+      return decoded;
+    };
+    const encryptedData = decode("encrypted_data");
+    const encryptedKey = decode("encrypted_key");
+    const iv = decode("iv");
+    const authTag = decode("auth_tag");
+    if (iv.length !== 12 || authTag.length !== 16) {
+      throw new Error("AgriStack response has invalid encryption parameters");
+    }
+
+    let plaintext: Buffer;
+    try {
+      const privateKey = createPrivateKey(readFileSync(this.getEnv("AGRISTACK_PRIVATE_KEY_PATH", "private_key.pem")));
+      if (privateKey.asymmetricKeyType !== "rsa" || privateKey.asymmetricKeyDetails?.modulusLength < 2048) {
+        throw new Error("AgriStack requires an RSA private key of at least 2048 bits");
+      }
+      const aesKey = privateDecrypt({
+        key: privateKey,
+        padding: constants.RSA_PKCS1_OAEP_PADDING,
+        oaepHash: "sha256",
+      }, encryptedKey);
+      if (aesKey.length !== 32) {
+        throw new Error("Invalid AES key length");
+      }
+      const decipher = createDecipheriv("aes-256-gcm", aesKey, iv);
+      decipher.setAuthTag(authTag);
+      plaintext = Buffer.concat([decipher.update(encryptedData), decipher.final()]);
+    } catch {
+      throw new Error("AgriStack response decryption failed; verify the private key and registered public key");
+    }
+    let entries: unknown;
+    try {
+      entries = JSON.parse(plaintext.toString("utf8"));
+    } catch {
+      throw new Error("AgriStack decrypted response is not valid JSON");
+    }
+    if (!Array.isArray(entries) || !entries.every((entry) =>
+      entry !== null && typeof entry === "object" && !Array.isArray(entry) &&
+      entry.farmerData !== null && typeof entry.farmerData === "object" &&
+      !Array.isArray(entry.farmerData) && Array.isArray(entry.landData))) {
+      throw new Error("AgriStack decrypted response must be an array of farmer records");
+    }
+    return entries;
   }
 
   private async seek(
     serviceId: string,
     queryParam: Record<string, string>,
     logLabel: string,
-  ): Promise<any> {
+    stateLgdCode: string,
+  ): Promise<Record<string, unknown>[]> {
+    if (!/^[1-9][0-9]?$/.test(stateLgdCode)) {
+      this.logger.warn("[AGRISTACK] Request rejected: missing or invalid stateLgdCode");
+      throw new Error("A valid stateLgdCode is required");
+    }
     const maxAttempts = 2;
     let lastError: unknown;
 
@@ -172,19 +245,20 @@ export class AgristackService {
         this.logger.log(
           `[AGRISTACK] ${logLabel} attempt=${attempt} queryParam=${JSON.stringify(queryParam)}`,
         );
-        const response = await axios.post(
+        const response = await axios.post<AgristackSeekResponse>(
           this.getSeekUrl(),
           requestPayload,
           {
             headers: {
               "Content-Type": "application/json",
-              "X-Internal-Request": "true",
+              "X-State-LGD-Code": stateLgdCode,
               Authorization: `Bearer ${token}`,
             },
             timeout: 20000,
           },
         );
 
+        const entries = this.decryptSeekResponse(response.data);
         await this.auditApiCall({
           logLabel,
           attempt,
@@ -196,7 +270,7 @@ export class AgristackService {
           responsePayload: response.data,
         });
 
-        return response.data;
+        return entries;
       } catch (error: any) {
         lastError = error;
         const status = error?.response?.status;
@@ -355,31 +429,31 @@ export class AgristackService {
     }
   }
 
-  /** Category A: identity + land basics by farmerId only. */
-  private async fetchCategoryA(farmerId: string): Promise<any> {
+  /** Category A: identity + village by farmer central ID. */
+  private async fetchCategoryA(farmerId: string, stateLgdCode: string): Promise<Record<string, unknown>[]> {
     const serviceId = this.getEnv(
       "AGRISTACK_SERVICE_ID_CATEGORY_A",
       "5cbfc880-ee43-45b4-993d-972f44fe5684",
     );
-    return this.seek(serviceId, { farmerId }, "categoryA");
+    return this.seek(serviceId, { frCentralId: farmerId }, "categoryA", stateLgdCode);
   }
 
   /** Category B: land + crop survey data by farmerId/season/year. */
-  private async fetchCategoryB(farmerId: string, season: string, year: string): Promise<any> {
+  private async fetchCategoryB(farmerId: string, season: string, year: string, stateLgdCode: string): Promise<Record<string, unknown>[]> {
     const serviceId = this.getEnv(
       "AGRISTACK_SERVICE_ID_CATEGORY_B",
       "69ade724-4c1e-4d7e-b2df-176b1cc7ef1b",
     );
-    return this.seek(serviceId, { farmerId, season, year }, "categoryB");
+    return this.seek(serviceId, { frCentralId: farmerId, season, year }, "categoryB", stateLgdCode);
   }
 
   /** Category C: full farmer + land ownership + crop survey data. */
-  private async fetchCategoryC(farmerId: string, season: string, year: string): Promise<any> {
+  private async fetchCategoryC(farmerId: string, season: string, year: string, stateLgdCode: string): Promise<Record<string, unknown>[]> {
     const serviceId = this.getEnv(
       "AGRISTACK_SERVICE_ID_CATEGORY_C",
       "91cb6b4d-d986-416a-bcb2-4b1201602909",
     );
-    return this.seek(serviceId, { farmerId, season, year }, "categoryC");
+    return this.seek(serviceId, { frCentralId: farmerId, season, year }, "categoryC", stateLgdCode);
   }
 
   private async searchCategoryA(body: any): Promise<any> {
@@ -391,8 +465,7 @@ export class AgristackService {
     }
 
     try {
-      const raw = await this.fetchCategoryA(farmerId);
-      const seekResponse = raw?.message?.seek_response ?? [];
+      const seekResponse = await this.fetchCategoryA(farmerId, this.getTagValue(body, "stateLgdCode"));
       return { context, message: { catalog: this.buildCatalog(body, "agristack-category-a", seekResponse) } };
     } catch (error: any) {
       return { context, message: { catalog: this.buildErrorCatalog(body, "upstream_error", error?.message ?? "AgriStack request failed") } };
@@ -413,8 +486,7 @@ export class AgristackService {
     }
 
     try {
-      const raw = await this.fetchCategoryB(farmerId, season, year);
-      const seekResponse = raw?.message?.seek_response ?? [];
+      const seekResponse = await this.fetchCategoryB(farmerId, season, year, this.getTagValue(body, "stateLgdCode"));
       return { context, message: { catalog: this.buildCatalog(body, "agristack-category-b", seekResponse) } };
     } catch (error: any) {
       return { context, message: { catalog: this.buildErrorCatalog(body, "upstream_error", error?.message ?? "AgriStack request failed") } };
@@ -435,8 +507,7 @@ export class AgristackService {
     }
 
     try {
-      const raw = await this.fetchCategoryC(farmerId, season, year);
-      const seekResponse = raw?.message?.seek_response ?? [];
+      const seekResponse = await this.fetchCategoryC(farmerId, season, year, this.getTagValue(body, "stateLgdCode"));
       return { context, message: { catalog: this.buildCatalog(body, "agristack-category-c", seekResponse) } };
     } catch (error: any) {
       return { context, message: { catalog: this.buildErrorCatalog(body, "upstream_error", error?.message ?? "AgriStack request failed") } };
