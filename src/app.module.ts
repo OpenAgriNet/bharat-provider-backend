@@ -41,6 +41,7 @@ import { AifSessionStore } from "./services/aif/aif-session.store";
 import { KccService } from "./services/kcc/kcc.service";
 import { KccSessionStore } from "./services/kcc/kcc-session.store";
 import { AgristackService } from "./services/agristack/agristack.service";
+import { KhcService } from "./services/khc/khc.service";
 
 @Module({
   imports: [
@@ -94,6 +95,7 @@ import { AgristackService } from "./services/agristack/agristack.service";
     KccService,
     KccSessionStore,
     AgristackService,
+    KhcService,
   ],
 })
 export class AppModule {}

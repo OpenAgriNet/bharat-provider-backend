@@ -65,6 +65,77 @@ Icar provider service is reference app for adding contents related to vistaar ne
 
 ## API Integrations
 
+### Kisan Help Center (KHC) grievances
+
+The `khc-agri` provider supports new and existing farmers. Registration follows
+**send OTP -> verify OTP -> collect/confirm grievance details -> create grievance**.
+Status lookup asks only for the grievance number and does not require OTP.
+
+Set these variables in the provider backend environment (not the browser):
+
+```dotenv
+KHC_BASE_URL=https://uat.dritm.com/khc/api/api
+KHC_API_KEY=<key supplied securely by KHC>
+```
+
+The key is sent as `Authorization: ApiKey <key>`. Do not include the `ApiKey`
+prefix in `KHC_API_KEY`. The UAT host sends real SMS; production requires a
+separate base URL and key. No cookie copied from a browser is needed.
+
+Beckn requests use `provider.id = khc-agri`, item `khc-grievance`, and flat
+`message.order.fulfillments[0].customer.person.tags`:
+
+| Endpoint | `request_type` | Inputs |
+| --- | --- | --- |
+| `/mobility/init` | `get_otp` | `farmerMobileNumber` |
+| `/mobility/init` | `verify_otp` | `farmerMobileNumber`, `otp` |
+| `/mobility/init` | `get_reference` | `reference_type`, optional `parent_id`, `name`, `page` |
+| `/mobility/init` | `create_grievance` | Verified mobile, creation fields below, `confirmed=true` |
+| `/mobility/status` | Not required | `grievanceNo`, preserved with slashes/leading zeros |
+
+Sending, verifying and creating must share `context.transaction_id`. Verification
+is bound to that transaction and mobile, and expires locally after five minutes.
+The verification response determines `isRegistered`; a caller cannot bypass the
+new-farmer requirements by claiming to be registered. OTPs, upstream login tokens
+and cookies are never echoed in Beckn responses. Login tokens are not retained:
+the grievance API uses the API key; the provider separately enforces verified
+mobile ownership. Resending OTP invalidates earlier local verification.
+
+Verification state is in memory, like the existing AIF session store: restarting
+requires a fresh OTP. Use Redis/shared state before deploying multiple replicas.
+
+Creation fields are `externalReferenceNo`, `farmerMobileNumber`,
+`farmerLanguage`, `stateId`, `villageId`, `scheme`, `division`,
+`problemCategory`, `problemSubCategory`, and `farmerText`. New farmers additionally
+require `farmerName` and `gender` (`M`, `F`, `O`). Existing farmers do not need those
+details again. IDs are sent as numbers. State/village IDs are LGD codes, but choose
+them through KHC's hierarchy. The grievance location may differ from home address.
+The chat agent reuses a stated grievance location or, when available, permitted
+browser coordinates via reverse geocoding and these reference APIs. Without usable
+coordinates it asks for location details; coordinates are never treated as IDs.
+
+Reference types: `states`; `districts` (parent state); `sub-districts` (district);
+`villages` (sub-district); `schemes` (state); `categories` (scheme);
+`sub-categories` (category). Pick `division` from the same scheme row. Reference
+results can be filtered by name and are paged locally, 50 rows per page. No example
+IDs are used as defaults. Upstream requests are not automatically retried.
+
+The chat tool derives a stable `externalReferenceNo` from the conversation and
+confirmed grievance fields. Per the KHC guide, resending the same reference returns
+the existing grievance instead of creating another. After a timeout or malformed
+creation response, do not blindly submit a new reference; verify with KHC first.
+
+Status is sent upstream as
+`GET /v1/state/grievances/status?grievanceNo=<encoded number>`, not as a header.
+Successful results include the grievance number, status, current level and date
+when provided. A missing grievance is an explicit `not_found` result.
+
+Run focused tests:
+
+```bash
+npm test -- --runInBand --runTestsByPath src/services/khc/khc.service.spec.ts
+```
+
 This service includes the following API integrations:
 
 - **PM Kisan Installment Check** - Check PM Kisan installment status and beneficiary details
