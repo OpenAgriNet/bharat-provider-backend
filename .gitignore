@@ -2,6 +2,10 @@
 /dist
 /node_modules
 
+# AgriStack encryption keys (provision outside source control)
+/private_key.pem
+/public_key.pem
+
 .env
 
 # Logs

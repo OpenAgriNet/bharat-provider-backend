@@ -14,3 +14,5 @@ docs
 docker-compose.yaml
 *.tar
 /files
+private_key.pem
+public_key.pem
