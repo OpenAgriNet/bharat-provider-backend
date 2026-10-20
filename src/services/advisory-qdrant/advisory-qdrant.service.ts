@@ -40,11 +40,11 @@ export class AdvisoryQdrantService {
     }
     if (!this.qdrantClient.isConfigured()) {
       this.logger.error(`[advisory-qdrant] ← txn=${txn} status=error reason=qdrant_not_configured`);
-      return respond('error', [], 'Qdrant is not configured on the provider');
+      return respond('error', [], 'Advisory search is not available');
     }
     if (!this.embeddingService.isConfigured()) {
       this.logger.error(`[advisory-qdrant] ← txn=${txn} status=error reason=embedding_not_configured`);
-      return respond('error', [], 'Embedding is not configured on the provider');
+      return respond('error', [], 'Advisory search is not available');
     }
 
     try {
@@ -63,7 +63,8 @@ export class AdvisoryQdrantService {
         `[advisory-qdrant] ← txn=${txn} status=error elapsedMs=${Date.now() - started} err=${err?.message || err}`,
         err?.stack,
       );
-      return respond('error', [], err?.message || 'Advisory search failed');
+      // Detail stays in the server log; callers on the network only get a fixed message.
+      return respond('error', [], 'Advisory search failed');
     }
   }
 

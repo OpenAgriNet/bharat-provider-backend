@@ -52,14 +52,18 @@ describe('AdvisoryQdrantService', () => {
     expect(qdrant.queryAdvisoryPoints).not.toHaveBeenCalled();
   });
 
-  it('reports an error when Qdrant is not configured', async () => {
+  it('reports a generic error when Qdrant is not configured', async () => {
     qdrant.isConfigured.mockReturnValue(false);
-    expect(ctx(await service.search(body('aphids'))).status).toBe('error');
+    const out = await service.search(body('aphids'));
+    expect(ctx(out).status).toBe('error');
+    expect(ctx(out).message).toBe('Advisory search is not available');
   });
 
-  it('reports an error when embedding is not configured', async () => {
+  it('reports a generic error when embedding is not configured', async () => {
     embedding.isConfigured.mockReturnValue(false);
-    expect(ctx(await service.search(body('aphids'))).status).toBe('error');
+    const out = await service.search(body('aphids'));
+    expect(ctx(out).status).toBe('error');
+    expect(ctx(out).message).toBe('Advisory search is not available');
   });
 
   it('embeds the query, searches advisory points, and returns one item per advisory entry', async () => {
@@ -91,10 +95,13 @@ describe('AdvisoryQdrantService', () => {
     expect(out.message.catalog.providers).toEqual([]);
   });
 
-  it('turns a backend failure into an error status instead of throwing', async () => {
-    qdrant.queryAdvisoryPoints.mockRejectedValue(new Error('Qdrant query failed HTTP 500'));
+  it('turns a backend failure into a fixed error message without leaking details', async () => {
+    qdrant.queryAdvisoryPoints.mockRejectedValue(
+      new Error('Qdrant query failed HTTP 500: {"status":{"error":"collection secret-name missing"}}'),
+    );
     const out = await service.search(body('aphids'));
     expect(ctx(out).status).toBe('error');
-    expect(ctx(out).message).toContain('HTTP 500');
+    expect(ctx(out).message).toBe('Advisory search failed');
+    expect(JSON.stringify(out)).not.toContain('secret-name');
   });
 });
