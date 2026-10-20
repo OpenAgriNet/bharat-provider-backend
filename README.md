@@ -57,6 +57,18 @@ $ npm run test:e2e
 # test coverage
 $ npm run test:cov
 ```
+## Advisory search (`knowledge-advisory`)
+
+`POST /mobility/search` with category `knowledge-advisory` searches advisory chunks that docs-pipeline writes to Qdrant (`document_kind=advisory`).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ADVISORY_BACKEND` | `marqo` | `qdrant` serves advisory from Qdrant; anything else keeps the legacy Marqo path. |
+| `ADVISORY_QDRANT_COLLECTION_NAME` | `QDRANT_COLLECTION_NAME` | Collection holding advisory chunks (sandbox: `document-data`; production: the PROD collection). |
+| `ADVISORY_QDRANT_TOP_K` | `5` | Maximum advisory entries returned (best chunk per advisory entry). |
+
+Uses the same `QDRANT_URL`, `QDRANT_API_KEY` and embedding setup (`HF_HOME`) as scheme search. The reply is `on_search` with `chunk-details` tags `title, crop, section, score, doc_id, chunk_id, source, text`; `text` ends with a `Source: <institute>, <creator>` line.
+
 ## About
 
 ICAR Reference App
