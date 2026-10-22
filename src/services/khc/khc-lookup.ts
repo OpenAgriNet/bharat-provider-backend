@@ -133,7 +133,7 @@ export class KhcLookup {
 
   /**
    * Where is this place? Searches the state's districts and sub-districts and the cached
-   * villages, and returns each match with its whole chain (state, district, block, village).
+   * villages, and returns each match with its whole chain (state, district, sub-district, village).
    */
   async findLocation(input: {
     name: string;
@@ -141,6 +141,8 @@ export class KhcLookup {
     stateName?: string;
     districtId?: number;
     districtName?: string;
+    // The sub-district the farmer picked from an earlier list; narrows a village name to one place.
+    subDistrictName?: string;
   }): Promise<Values> {
     const master = this.deps.master;
     const resolved = await this.resolveState(input.stateId, input.stateName);
@@ -167,7 +169,7 @@ export class KhcLookup {
       }
       if (district) districtRef = ref("districts", district);
       // The place may itself be a district.
-      for (const row of matchRows(districts, "districts", input.name)) {
+      for (const row of input.subDistrictName ? [] : matchRows(districts, "districts", input.name)) {
         matches.push({
           level: "district",
           ...ref("districts", row),
@@ -178,7 +180,7 @@ export class KhcLookup {
       }
       if (districtRef) {
         const subDistricts = await this.deps.listAll("sub-districts", districtRef.id);
-        for (const row of matchRows(subDistricts, "sub-districts", input.name)) {
+        for (const row of input.subDistrictName ? [] : matchRows(subDistricts, "sub-districts", input.name)) {
           matches.push({
             level: "sub-district",
             ...ref("sub-districts", row),
@@ -192,9 +194,13 @@ export class KhcLookup {
     }
 
     if (master?.isReady()) {
-      const scope = { stateId: stateRef?.id, districtId: districtRef?.id };
+      const scope = {
+        stateId: stateRef?.id,
+        districtId: districtRef?.id,
+        subDistrictName: input.subDistrictName,
+      };
       matches.push(...(await master.search("village", input.name, scope, SEARCH_LIMIT)));
-      if (!districtRef) {
+      if (!districtRef && !input.subDistrictName) {
         matches.push(...(await master.search("sub-district", input.name, scope, SEARCH_LIMIT)));
       }
     }

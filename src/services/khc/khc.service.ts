@@ -628,12 +628,13 @@ export class KhcService {
               stateName: optionalText(values, "state_name", 100),
               districtId: optionalId(values.district_id, "district_id"),
               districtName: optionalText(values, "district_name", 100),
+              subDistrictName: optionalText(values, "sub_district_name", 100),
             })
           );
           return buildResponse(body, action, {
             code: "khc_location",
             name: "KHC location",
-            short_desc: "Matching places with their state, district and block.",
+            short_desc: "Matching places with their state, district and sub-district.",
             list: listOf(result),
           });
         }

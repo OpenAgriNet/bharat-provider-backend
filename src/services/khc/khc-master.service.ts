@@ -236,7 +236,7 @@ export class KhcMasterService implements OnModuleInit, OnModuleDestroy {
   async search(
     level: "village" | "sub-district",
     name: string,
-    scope: { stateId?: number; districtId?: number },
+    scope: { stateId?: number; districtId?: number; subDistrictName?: string },
     limit: number
   ): Promise<PlaceMatch[]> {
     if (!this.ready || !this.pool) return [];
@@ -253,6 +253,11 @@ export class KhcMasterService implements OnModuleInit, OnModuleDestroy {
     if (scope.districtId) {
       args.push(scope.districtId);
       where.push(village ? `x.district_id = $${args.length}` : `x.parent_id = $${args.length}`);
+    }
+    const subDistrictKey = scope.subDistrictName ? looseKey(scope.subDistrictName).replace(/[\\%_]/g, "\\$&") : "";
+    if (village && subDistrictKey) {
+      args.push(subDistrictKey);
+      where.push(`sd.name_norm LIKE '%' || $${args.length} || '%'`);
     }
     where.push(scope.stateId || scope.districtId ? "x.name_norm LIKE '%' || $1 || '%'" : "x.name_norm LIKE $1 || '%'");
     args.push(limit);

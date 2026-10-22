@@ -293,7 +293,7 @@ suite("village-first location lookup and grievance tree (real Postgres)", () => 
 
   it("creates its own tables at startup (no setup script)", async () => {
     const { rows } = await admin.query("SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_name LIKE 'khc\\_%'");
-    expect(rows[0].n).toBe(8);
+    expect(rows[0].n).toBe(9);
   });
 
   it("matches loosely: case, punctuation, typos; ambiguous names return candidates", () => {
@@ -309,7 +309,9 @@ suite("village-first location lookup and grievance tree (real Postgres)", () => 
   it("district given: one call finds the village with its whole chain", async () => {
     fakeKhc(service);
     const result = (await service.lookup.findLocation({ name: "abupur", stateName: "uttarpredesh", districtName: "Meerut" })) as any;
-    expect(result.total).toBe(3);
+    // Exact name wins: "Abupur Kalan" is left out when "Abupur" matches exactly.
+    expect(result.total).toBe(2);
+    expect(result.matches.every((m: any) => m.name === "Abupur")).toBe(true);
     const first = result.matches.find((m: any) => m.subDistrict.id === 1067 && m.id === 5);
     expect(first).toMatchObject({ level: "village", name: "Abupur", state: { id: 9, name: "Uttar Pradesh" }, district: { id: 221, name: "Meerut" }, subDistrict: { id: 1067, name: "Meerut Block" } });
   });
@@ -425,6 +427,17 @@ suite("several villages with the same name (real Postgres)", () => {
     expect(result.matches.every((m: any) => m.name === "Abupur")).toBe(true);
     const where = result.matches.map((m: any) => `${m.subDistrict.name}|${m.district.name}`).sort();
     expect(where).toEqual(["Daurala|Meerut", "Loni|Ghaziabad", "Meerut Block|Meerut"]);
+  });
+
+  it("a village plus the picked sub-district narrows to exactly one place", async () => {
+    const result = (await service.lookup.findLocation({ name: "abupur", stateName: "uttarpradesh", subDistrictName: "Loni" })) as any;
+    expect(result.total).toBe(1);
+    expect(result.matches[0]).toMatchObject({
+      level: "village", id: 8, subDistrict: { id: 2001, name: "Loni" }, district: { id: 222, name: "Ghaziabad" }, state: { id: 9 },
+    });
+    // The sub-district's own name must not turn into a match for the place.
+    const wrong = (await service.lookup.findLocation({ name: "loni", stateName: "uttarpradesh", subDistrictName: "Daurala" })) as any;
+    expect(wrong.matches).toEqual([]);
   });
 
   it("a partial name still matches when there is no exact one", async () => {
