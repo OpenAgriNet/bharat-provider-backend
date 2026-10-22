@@ -205,6 +205,8 @@ export class KhcLookup {
         state,
         schemes: (found.length ? found : schemes).map(scheme),
         needs: "scheme",
+        // none: the named scheme is not offered by KHC in this state; several: pick one.
+        match: !input.scheme ? "unnamed" : found.length ? "several" : "none",
       };
     }
     const chosen = scheme(found[0]);

@@ -118,6 +118,12 @@ through the API.
 # KHC_VILLAGE_BATCH=1000            # sub-districts whose villages load per monthly run
 ```
 
+OTP limits (per mobile number, in memory per provider instance; override with env):
+a new OTP cannot be sent within 30 seconds of the last (`KHC_OTP_RESEND_SECONDS`), at most 3
+per hour (`KHC_OTP_MAX_SENDS_PER_HOUR`), and a wrong OTP gets 5 tries before a new OTP is
+needed (`KHC_OTP_MAX_ATTEMPTS`). Blocked requests return the `rate_limited` result with a
+plain message the bot repeats to the farmer.
+
 Two extra `/mobility/init` request types use the cache:
 
 | `request_type` | Inputs | Result tag |

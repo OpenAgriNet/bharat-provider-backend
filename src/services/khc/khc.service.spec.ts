@@ -361,6 +361,8 @@ describe("KhcService", () => {
 
   it("invalidates verification when an OTP is resent", async () => {
     await verified();
+    // Past the resend timer, so the second OTP is allowed.
+    jest.spyOn(Date, "now").mockReturnValue(Date.now() + 31_000);
     http.request.mockResolvedValueOnce({
       data: { status: "200 OK", data: null },
     });
@@ -544,7 +546,7 @@ describe("KhcService", () => {
     });
     await expect(
       service.verifyOtp("tx", "9876543210", "123456")
-    ).rejects.toThrow("OTP verification failed");
+    ).rejects.toThrow("The OTP is not correct. You have 4 tries left.");
     await expect(service.createGrievance(existing, "tx")).rejects.toThrow(
       "Send and verify"
     );

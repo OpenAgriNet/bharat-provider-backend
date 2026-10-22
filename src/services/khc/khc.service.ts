@@ -97,8 +97,11 @@ export class KhcService {
       expiresAt: number;
       verified: boolean;
       isRegistered?: boolean;
+      wrongAttempts: number;
     }
   >();
+  // ponytail: per-instance send history; share it through Redis before running several replicas.
+  private readonly otpSends = new Map<string, number[]>();
   private readonly verificationWindowMs = 5 * 60 * 1000;
 
   constructor(
@@ -257,6 +260,33 @@ export class KhcService {
     return value;
   }
 
+  private otpLimit(name: string, fallback: number): number {
+    const value = Number(this.config.get<string>(name));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  /** Resend timer and hourly cap per mobile, so OTP SMS cannot be spammed. */
+  private checkOtpSendLimits(mobile: string): void {
+    const now = Date.now();
+    const hour = 60 * 60 * 1000;
+    const sends = (this.otpSends.get(mobile) ?? []).filter((at) => now - at < hour);
+    this.otpSends.set(mobile, sends);
+    const waitMs =
+      sends.length && this.otpLimit("KHC_OTP_RESEND_SECONDS", 30) * 1000 - (now - sends[sends.length - 1]);
+    if (waitMs > 0) {
+      throw new KhcError(
+        `Please wait ${Math.ceil(waitMs / 1000)} seconds before asking for a new OTP.`,
+        "rate_limited"
+      );
+    }
+    if (sends.length >= this.otpLimit("KHC_OTP_MAX_SENDS_PER_HOUR", 3)) {
+      throw new KhcError(
+        "Too many OTP requests for this number. Please try again after an hour.",
+        "rate_limited"
+      );
+    }
+  }
+
   async sendOtp(transactionId: string, value: unknown): Promise<void> {
     const mobile = this.mobile(value);
     if (!transactionId)
@@ -264,14 +294,17 @@ export class KhcService {
         "A conversation transaction ID is required.",
         "invalid_request"
       );
+    this.checkOtpSendLimits(mobile);
     this.sessions.delete(transactionId);
     for (const [key, session] of this.sessions) {
       if (Date.now() >= session.expiresAt) this.sessions.delete(key);
     }
     await this.request("POST", "/auth/send-otp", { mobile });
+    this.otpSends.set(mobile, [...(this.otpSends.get(mobile) ?? []), Date.now()]);
     this.sessions.set(transactionId, {
       mobile,
       verified: false,
+      wrongAttempts: 0,
       expiresAt: Date.now() + this.verificationWindowMs,
     });
   }
@@ -304,11 +337,33 @@ export class KhcService {
     if (typeof otp !== "string" || !/^[0-9]{6}$/.test(otp)) {
       throw new KhcError("A valid 6-digit OTP is required.", "invalid_request");
     }
+    const maxAttempts = this.otpLimit("KHC_OTP_MAX_ATTEMPTS", 5);
+    if (session.wrongAttempts >= maxAttempts) {
+      throw new KhcError(
+        "Too many wrong OTP tries. Please ask for a new OTP.",
+        "rate_limited"
+      );
+    }
     session.verified = false;
-    const result = await this.request("POST", "/auth/verify-otp", {
-      mobile,
-      otp,
-    });
+    let result: unknown;
+    try {
+      result = await this.request("POST", "/auth/verify-otp", {
+        mobile,
+        otp,
+      });
+    } catch (error) {
+      if (error instanceof KhcError && error.code === "invalid_otp") {
+        session.wrongAttempts += 1;
+        const left = maxAttempts - session.wrongAttempts;
+        throw new KhcError(
+          left > 0
+            ? `The OTP is not correct. You have ${left} ${left === 1 ? "try" : "tries"} left.`
+            : "Too many wrong OTP tries. Please ask for a new OTP.",
+          left > 0 ? "invalid_otp" : "rate_limited"
+        );
+      }
+      throw error;
+    }
     if (
       !record(result) ||
       typeof result.isRegistered !== "boolean" ||
@@ -328,6 +383,7 @@ export class KhcService {
       );
     }
     session.verified = true;
+    session.wrongAttempts = 0;
     session.isRegistered = result.isRegistered;
     session.expiresAt = Date.now() + this.verificationWindowMs;
     return result.isRegistered;
