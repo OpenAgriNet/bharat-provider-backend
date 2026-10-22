@@ -12,6 +12,8 @@ export interface LookupDeps {
 export class LookupError extends Error {}
 
 const MAX_MATCHES = 10;
+// Search deeper than we return, so `total` can say whether the list was cut.
+const SEARCH_LIMIT = 51;
 const VILLAGE_FILL_LIMIT = 40; // sub-district village lists fetched for one lookup
 const VILLAGE_FILL_PARALLEL = 5;
 
@@ -49,6 +51,62 @@ export function matchRows(rows: Values[], kind: string, query: string): Values[]
 const idOf = (kind: string, row: Values) => Number(row[REFERENCES[kind].id]);
 const nameOf = (kind: string, row: Values) => String(row[REFERENCES[kind].name]);
 const ref = (kind: string, row: Values) => ({ id: idOf(kind, row), name: nameOf(kind, row) });
+
+
+const STOPWORDS = new Set(
+  "a an and are as at be been by for from has have i in is it me my not of on or so that the this to under was were with am no yet about".split(" ")
+);
+// Crude stem so "refused"/"refuses"/"refusing" compare equal.
+const stem = (word: string) => word.replace(/(ing|ed|es|s)$/, "");
+const tokens = (text: string) =>
+  new Set(
+    text
+      .toLocaleLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word.length > 1 && !STOPWORDS.has(word))
+      .map(stem)
+  );
+const overlap = (concern: Set<string>, name: string) => {
+  const own = tokens(name);
+  if (!own.size) return 0;
+  let hit = 0;
+  for (const word of own) if (concern.has(word)) hit += 1;
+  return hit / own.size;
+};
+
+interface CategoryNode {
+  id: number;
+  name: string;
+  subCategories: { id: number; name: string }[];
+}
+
+/**
+ * Best category + sub-category for a complaint by word overlap with their names, or null when no
+ * single pair clearly wins. English only (the tool passes an English summary); the caller falls
+ * back to showing the list.
+ */
+export function suggestCategory(
+  concern: string,
+  categories: CategoryNode[]
+): { category: { id: number; name: string }; subCategory: { id: number; name: string } } | null {
+  const words = tokens(concern);
+  if (!words.size) return null;
+  const scored: { score: number; category: CategoryNode; sub: { id: number; name: string } }[] = [];
+  for (const category of categories) {
+    const categoryScore = overlap(words, category.name);
+    for (const sub of category.subCategories) {
+      scored.push({ score: 2 * overlap(words, sub.name) + categoryScore, category, sub });
+    }
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const [best, second] = scored;
+  // At least a full sub-category match, or a strong partial plus its category, and a clear lead.
+  if (!best || best.score < 1.2 || (second && best.score - second.score < 0.4)) return null;
+  return {
+    category: { id: best.category.id, name: best.category.name },
+    subCategory: best.sub,
+  };
+}
 
 export class KhcLookup {
   constructor(private readonly deps: LookupDeps) {}
@@ -135,15 +193,20 @@ export class KhcLookup {
 
     if (master?.isReady()) {
       const scope = { stateId: stateRef?.id, districtId: districtRef?.id };
-      matches.push(...(await master.search("village", input.name, scope, MAX_MATCHES)));
+      matches.push(...(await master.search("village", input.name, scope, SEARCH_LIMIT)));
       if (!districtRef) {
-        matches.push(...(await master.search("sub-district", input.name, scope, MAX_MATCHES)));
+        matches.push(...(await master.search("sub-district", input.name, scope, SEARCH_LIMIT)));
       }
     }
 
+    // An exact name beats partial ones ("Abupur" should not also list "Abupur Kalan").
+    const key = looseKey(input.name);
+    const exact = matches.filter((match) => looseKey(match.name) === key);
+    const best = exact.length ? exact : matches;
     const result: Values = {
-      matches: matches.slice(0, MAX_MATCHES),
-      total: matches.length,
+      matches: best.slice(0, MAX_MATCHES),
+      // Real count (capped at SEARCH_LIMIT): more than matches.length means the list was cut.
+      total: best.length,
     };
     if (stateRef) result.state = stateRef;
     if (districtRef) result.district = districtRef;
@@ -184,6 +247,7 @@ export class KhcLookup {
     stateId?: number;
     stateName?: string;
     scheme?: string;
+    concern?: string;
   }): Promise<Values> {
     const resolved = await this.resolveState(input.stateId, input.stateName);
     if (!resolved.state) {
@@ -219,6 +283,9 @@ export class KhcLookup {
         ).map((row) => ref("sub-categories", row)),
       }))
     );
-    return { state, scheme: chosen, categories: tree };
+    const result: Values = { state, scheme: chosen, categories: tree };
+    const suggested = input.concern ? suggestCategory(input.concern, tree) : null;
+    if (suggested) result.suggested = suggested;
+    return result;
   }
 }

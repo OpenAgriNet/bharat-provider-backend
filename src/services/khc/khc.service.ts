@@ -643,6 +643,7 @@ export class KhcService {
               stateId: optionalId(values.state_id, "state_id"),
               stateName: optionalText(values, "state_name", 100),
               scheme: optionalText(values, "scheme_name", 100),
+              concern: optionalText(values, "concern", 500),
             })
           );
           return buildResponse(body, action, {

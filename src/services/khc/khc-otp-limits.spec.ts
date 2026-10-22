@@ -2,7 +2,7 @@ import { ConfigService } from "@nestjs/config";
 import { Logger } from "@nestjs/common";
 import axios from "axios";
 import { KhcService } from "./khc.service";
-import { KhcLookup } from "./khc-lookup";
+import { KhcLookup, suggestCategory } from "./khc-lookup";
 
 jest.mock("axios");
 const http = axios as jest.Mocked<typeof axios>;
@@ -140,5 +140,55 @@ describe("grievance tree when the scheme is not offered", () => {
   it("distinguishes no scheme named from an unclear one", async () => {
     expect(((await lookup(rows).grievanceTree({ stateName: "Uttar Pradesh" })) as any).match).toBe("unnamed");
     expect(((await lookup(rows).grievanceTree({ stateName: "Uttar Pradesh", scheme: "i" })) as any).match).toBe("several");
+  });
+});
+
+describe("suggestCategory", () => {
+  const tree = [
+    { id: 39, name: "Bank Loan Sanction Issues", subCategories: [
+      { id: 1725, name: "Bank refused loan under AIF" },
+      { id: 1726, name: "Loan sanction delay" },
+      { id: 1727, name: "Excess collateral demanded" },
+    ] },
+    { id: 41, name: "Fund Disbursement Issues", subCategories: [
+      { id: 1801, name: "Subsidy not received" },
+      { id: 1802, name: "Payment delay" },
+    ] },
+  ];
+
+  it("picks the sub-category whose words the complaint uses", () => {
+    expect(suggestCategory("The bank refused my loan", tree)).toEqual({
+      category: { id: 39, name: "Bank Loan Sanction Issues" },
+      subCategory: { id: 1725, name: "Bank refused loan under AIF" },
+    });
+    expect(suggestCategory("subsidy not received for 6 months", tree)?.subCategory.id).toBe(1801);
+  });
+
+  it("returns null when nothing clearly fits, so the list is shown", () => {
+    expect(suggestCategory("my crop was damaged by rain", tree)).toBeNull();
+    expect(suggestCategory("", tree)).toBeNull();
+    expect(suggestCategory("delay", tree)).toBeNull(); // fits two sub-categories equally
+  });
+
+  it("grievanceTree adds the suggestion only when a concern is given and it is clear", async () => {
+    const lookup = new KhcLookup({
+      listAll: async (kind, parent) => {
+        if (kind === "states") return [{ stateid: 9, statename: "Uttar Pradesh" }];
+        if (kind === "schemes") return [{ scheme: 38, schemename: "AIF", division: 31 }];
+        if (kind === "categories") {
+          return tree.map((c) => ({ problemcategory: c.id, categoryname: c.name }));
+        }
+        return tree
+          .find((c) => c.id === parent)!
+          .subCategories.map((x) => ({ problemsubcategory: x.id, subcategoryname: x.name }));
+      },
+    });
+    const withConcern = (await lookup.grievanceTree({ stateName: "Uttar Pradesh", scheme: "AIF", concern: "bank refused my loan" })) as any;
+    expect(withConcern.suggested.subCategory.id).toBe(1725);
+    const without = (await lookup.grievanceTree({ stateName: "Uttar Pradesh", scheme: "AIF" })) as any;
+    expect(without.suggested).toBeUndefined();
+    const vague = (await lookup.grievanceTree({ stateName: "Uttar Pradesh", scheme: "AIF", concern: "rain damaged crop" })) as any;
+    expect(vague.suggested).toBeUndefined();
+    expect(vague.categories).toHaveLength(2);
   });
 });

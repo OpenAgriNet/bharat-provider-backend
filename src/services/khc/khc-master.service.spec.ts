@@ -371,3 +371,59 @@ describe("KhcService without a master cache", () => {
     expect(http.request).toHaveBeenCalledTimes(1);
   });
 });
+
+suite("several villages with the same name (real Postgres)", () => {
+  let master: KhcMasterService;
+  let service: KhcService;
+  let admin: Pool;
+
+  beforeAll(async () => {
+    process.env.KHC_DB_HOST = host;
+    process.env.KHC_DB_NAME = process.env.KHC_TEST_DB_NAME;
+    process.env.KHC_DB_USER = process.env.KHC_TEST_DB_USER;
+    process.env.KHC_DB_PASSWORD = process.env.KHC_TEST_DB_PASSWORD;
+    admin = new Pool({ host, database: process.env.KHC_TEST_DB_NAME, user: process.env.KHC_TEST_DB_USER, password: process.env.KHC_TEST_DB_PASSWORD });
+    master = new KhcMasterService();
+    await master.onModuleInit();
+  });
+  afterAll(async () => { await master.onModuleDestroy(); await admin.end(); });
+  beforeEach(async () => {
+    jest.resetAllMocks();
+    await admin.query("TRUNCATE khc_state, khc_district, khc_sub_district, khc_village, khc_scheme, khc_category, khc_sub_category, khc_sync_state");
+    service = new KhcService(new ConfigService({ KHC_BASE_URL: "https://khc.test/api", KHC_API_KEY: "k" }), master);
+    await master.store("states", 0, "stateid", "statename", [{ stateid: 9, statename: "Uttar Pradesh" }]);
+    await master.store("districts", 9, "districtid", "districtname", [
+      { districtid: 221, districtname: "Meerut" }, { districtid: 222, districtname: "Ghaziabad" },
+    ]);
+    await master.store("sub-districts", 221, "subdistrictid", "subdistrictname", [
+      { subdistrictid: 1067, subdistrictname: "Meerut Block" }, { subdistrictid: 1068, subdistrictname: "Daurala" },
+    ]);
+    await master.store("sub-districts", 222, "subdistrictid", "subdistrictname", [
+      { subdistrictid: 2001, subdistrictname: "Loni" },
+    ]);
+    await master.store("villages", 1067, "villageid", "villagename", [{ villageid: 5, villagename: "Abupur" }, { villageid: 6, villagename: "Abupur Kalan" }]);
+    await master.store("villages", 1068, "villageid", "villagename", [{ villageid: 7, villagename: "Abupur" }]);
+    await master.store("villages", 2001, "villageid", "villagename", [{ villageid: 8, villagename: "Abupur" }]);
+  });
+
+  it("state + village: lists only exact matches, each with its block and district", async () => {
+    const result = (await service.lookup.findLocation({ name: "abupur", stateName: "uttarpradesh" })) as any;
+    expect(result.total).toBe(3);
+    expect(result.matches.every((m: any) => m.name === "Abupur")).toBe(true);
+    const where = result.matches.map((m: any) => `${m.subDistrict.name}|${m.district.name}`).sort();
+    expect(where).toEqual(["Daurala|Meerut", "Loni|Ghaziabad", "Meerut Block|Meerut"]);
+  });
+
+  it("a partial name still matches when there is no exact one", async () => {
+    const result = (await service.lookup.findLocation({ name: "kalan", stateName: "Uttar Pradesh" })) as any;
+    expect(result.matches.map((m: any) => m.name)).toEqual(["Abupur Kalan"]);
+  });
+
+  it("total shows when the list was cut", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ villageid: 100 + i, villagename: "Rampur" }));
+    await master.store("villages", 1067, "villageid", "villagename", many);
+    const result = (await service.lookup.findLocation({ name: "rampur", stateName: "Uttar Pradesh" })) as any;
+    expect(result.matches.length).toBe(10);
+    expect(result.total).toBeGreaterThan(10);
+  });
+});
