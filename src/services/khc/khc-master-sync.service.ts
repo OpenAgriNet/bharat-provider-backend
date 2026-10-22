@@ -14,7 +14,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  *                                   refresh age (restarts do not repeat it); =force always runs
  *   KHC_SYNC_GRIEVANCE_CRON         schemes/categories/sub-categories (default 1st of the month 02:00)
  *   KHC_SYNC_LOCATION_CRON          states..villages (default 1st of the month 03:00)
- *   KHC_VILLAGE_BATCH               sub-districts whose villages are fetched per run (default 1000);
+ *   KHC_VILLAGE_BATCH               sub-districts whose villages are fetched per run (default 10000,
+ *                                   more than India has, so one run loads everything; lower it to spread the load);
  *                                   the rest fill in on first lookup or on later monthly runs
  *   KHC_SYNC_REFRESH_DAYS           re-fetch lists older than this (default 25, keep below the cron gap)
  *   KHC_SYNC_DELAY_MS               pause between KHC calls (default 100)
@@ -74,7 +75,7 @@ export class KhcMasterSyncService implements OnModuleInit {
   /** states -> districts -> sub-districts -> villages (villages in batches) */
   async syncLocationTree(onlyIfDue = false): Promise<void> {
     await this.run("location", onlyIfDue, async (pull) => {
-      const batch = Math.max(1, parseInt(process.env.KHC_VILLAGE_BATCH || "1000", 10) || 1000);
+      const batch = Math.max(1, parseInt(process.env.KHC_VILLAGE_BATCH || "10000", 10) || 10000);
       await pull("states", 0, true);
       for (const stateId of await this.master.staleParents("states", "districts", 1000)) {
         await pull("districts", stateId);

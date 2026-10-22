@@ -117,7 +117,7 @@ through the API.
 # KHC_SYNC_ON_START=true            # at startup, run a job only if it has not finished in the last 25 days
 # KHC_SYNC_ON_START=force           # always run at startup (e.g. to load the remaining villages)
 # KHC_SYNC_GRIEVANCE_CRON="0 0 2 1 * *"   KHC_SYNC_LOCATION_CRON="0 0 3 1 * *"
-# KHC_VILLAGE_BATCH=1000            # sub-districts whose villages load per monthly run
+# KHC_VILLAGE_BATCH=10000           # sub-districts whose villages load per run (default loads all, ~7000 exist)
 ```
 
 OTP limits (per mobile number, in memory per provider instance; override with env):
