@@ -110,7 +110,7 @@ suite("KhcMasterService + DB-first getReference (real Postgres)", () => {
   it("serves stale cache when the API fails, and fails when nothing is cached", async () => {
     api(villages(3));
     await service.getReference("villages", 1067);
-    await admin.query("UPDATE khc_sync_state SET last_synced_at = NOW() - INTERVAL '60 days'");
+    await admin.query("UPDATE khc_sync_state SET last_synced_at = NOW() - INTERVAL '200 days'");
     http.request.mockRejectedValueOnce(new Error("down"));
     const stale = await service.getReference("villages", 1067);
     expect(stale.total).toBe(3);
@@ -121,7 +121,7 @@ suite("KhcMasterService + DB-first getReference (real Postgres)", () => {
   it("refetches when the cached list is older than the freshness window", async () => {
     api(villages(2));
     await service.getReference("villages", 1067);
-    await admin.query("UPDATE khc_sync_state SET last_synced_at = NOW() - INTERVAL '60 days'");
+    await admin.query("UPDATE khc_sync_state SET last_synced_at = NOW() - INTERVAL '200 days'");
     api(villages(4));
     const result = await service.getReference("villages", 1067);
     expect(http.request).toHaveBeenCalledTimes(2);
@@ -221,6 +221,17 @@ suite("KhcMasterService + DB-first getReference (real Postgres)", () => {
     expect((await master.lastJobRun("location"))?.status).toBe("ok");
     await master.recordJobRun("location", "aborted", {});
     expect(await master.lastJobRun("location")).toBeNull(); // an aborted run does not count
+  });
+
+  it("places and grievance lists have different windows (places ~100 days, schemes 35)", async () => {
+    await master.store("districts", 9, "districtid", "districtname", [{ districtid: 221, districtname: "Meerut" }]);
+    await master.store("schemes", 9, "scheme", "schemename", [{ scheme: 38, schemename: "AIF" }]);
+    await admin.query("UPDATE khc_sync_state SET last_synced_at = NOW() - INTERVAL '60 days'");
+    expect(await master.isFresh("districts", 9)).toBe(true);
+    expect(await master.isFresh("schemes", 9)).toBe(false);
+    await admin.query("UPDATE khc_sync_state SET last_synced_at = NOW() - INTERVAL '90 days' WHERE kind = 'districts'");
+    expect(await master.isFresh("districts", 9)).toBe(true); // inside the read window ...
+    expect(await master.isFresh("districts", 9, 85 * 24 * 60 * 60 * 1000)).toBe(false); // ... but due for the sync
   });
 
   it("only one sync can hold the lock", async () => {

@@ -34,14 +34,20 @@ describe("KhcMasterSyncService restarts", () => {
     expect(master.recordJobRun).not.toHaveBeenCalled();
   });
 
-  it("a restart long after the last sync runs it again and records the run", async () => {
-    const { service, khc, recorded } = setup({ at: daysAgo(40), status: "ok" });
+  it("a restart long after the last sync (past both refresh ages) runs it again and records the run", async () => {
+    const { service, khc, recorded } = setup({ at: daysAgo(100), status: "ok" });
     await service.startupSync();
     expect(khc.fetchReferenceRows).toHaveBeenCalled();
     expect(recorded).toEqual([
       { name: "grievance", status: "ok" },
       { name: "location", status: "ok" },
     ]);
+  });
+
+  it("each job uses its own refresh age: 40 days old is due for schemes (25) but not for places (85)", async () => {
+    const { service, recorded } = setup({ at: daysAgo(40), status: "ok" });
+    await service.startupSync();
+    expect(recorded).toEqual([{ name: "grievance", status: "ok" }]);
   });
 
   it("the first ever start (no record) runs", async () => {

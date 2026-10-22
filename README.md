@@ -98,10 +98,16 @@ separate base URL and key. No cookie copied from a browser is needed.
 
 Reference lists (states, districts, sub-districts, villages, schemes, categories,
 sub-categories) are cached in Postgres. Lookups read the DB first and fall back to the
-KHC API when a list is missing, older than 35 days, or the DB is down; stale data is
-served if the API is also down. A monthly cron (1st of the month, 02:00 schemes/categories,
-03:00 locations) keeps it warm. Each finished run is remembered in `khc_sync_job`, so
-restarting the provider does not call KHC again.
+KHC API when a list is missing, too old, or the DB is down; stale data is served if the API
+is also down. Two cron jobs keep it warm, each remembered in `khc_sync_job` so restarting
+the provider does not call KHC again:
+
+| Data | Cron (default) | Refreshed when older than | Trusted by lookups for |
+| --- | --- | --- | --- |
+| Schemes, categories, sub-categories | 1st of every month, 00:00 | 25 days | 35 days |
+| States, districts, sub-districts, villages | 1st of Jan/Apr/Jul/Oct, 00:30 | 85 days | 100 days |
+
+The location job runs 30 minutes after the other because they share one lock.
 
 Like the mandi cache, it needs no setup script: the `khc_*` tables are created at startup
 in the database the provider already uses (`IMD_DB_*`). Nothing to configure; override
@@ -111,12 +117,14 @@ through the API.
 ```dotenv
 # KHC_DB_HOST= KHC_DB_PORT= KHC_DB_NAME= KHC_DB_USER= KHC_DB_PASSWORD= KHC_DB_SSL=   (default: IMD_DB_*)
 # KHC_MASTER_DB_ENABLED=false       # turn the cache off
-# KHC_MASTER_MAX_AGE_DAYS=35        # how long a stored list is trusted by reads
-# KHC_SYNC_REFRESH_DAYS=25          # the cron re-fetches lists older than this (keep below the cron gap)
+# KHC_MASTER_MAX_AGE_DAYS=35            # schemes/categories: how long reads trust a stored list
+# KHC_MASTER_LOCATION_MAX_AGE_DAYS=100  # places: same
+# KHC_SYNC_REFRESH_DAYS=25              # schemes/categories: the cron re-fetches lists older than this
+# KHC_SYNC_LOCATION_REFRESH_DAYS=85     # places: same (keep both below their cron gap)
 # KHC_SYNC_ENABLED=false            # turn the cron off
 # KHC_SYNC_ON_START=true            # at startup, run a job only if it has not finished in the last 25 days
 # KHC_SYNC_ON_START=force           # always run at startup (e.g. to load the remaining villages)
-# KHC_SYNC_GRIEVANCE_CRON="0 0 2 1 * *"   KHC_SYNC_LOCATION_CRON="0 0 3 1 * *"
+# KHC_SYNC_GRIEVANCE_CRON="0 0 0 1 * *"   KHC_SYNC_LOCATION_CRON="0 30 0 1 */3 *"   # seconds first
 # KHC_VILLAGE_BATCH=10000           # sub-districts whose villages load per run (default loads all, ~7000 exist)
 ```
 

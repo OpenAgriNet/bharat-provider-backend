@@ -23,12 +23,21 @@ const TABLES: Record<string, string> = {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const days = (name: string, fallback: number) =>
   (parseFloat(process.env[name] || "") || fallback) * DAY_MS;
-// Reads trust a stored list this long. The sync runs monthly, so this is a little longer than
-// a month: a late or missed run must not push every lookup back to the KHC API.
-const maxAgeMs = () => days("KHC_MASTER_MAX_AGE_DAYS", 35);
-// The sync re-fetches lists older than this. It must be shorter than the gap between
-// sync runs (a month is 28-31 days), or a list synced last run still looks fresh and is skipped.
-export const refreshAgeMs = () => days("KHC_SYNC_REFRESH_DAYS", 25);
+// Schemes, categories and sub-categories change more often than places, so they sync monthly and
+// places every 3 months. Each group has two windows:
+//  - read window: reads trust a stored list this long. A little longer than the sync gap, so a late
+//    or missed run does not push every lookup back to the KHC API.
+//  - refresh age: the sync re-fetches lists older than this. It must be shorter than the gap
+//    between runs, or a list synced last run still looks fresh and is skipped.
+const GRIEVANCE_KINDS = new Set(["schemes", "categories", "sub-categories"]);
+const maxAgeMs = (kind: string) =>
+  GRIEVANCE_KINDS.has(kind)
+    ? days("KHC_MASTER_MAX_AGE_DAYS", 35)
+    : days("KHC_MASTER_LOCATION_MAX_AGE_DAYS", 100);
+export const refreshAgeMs = (kind: string) =>
+  GRIEVANCE_KINDS.has(kind)
+    ? days("KHC_SYNC_REFRESH_DAYS", 25)
+    : days("KHC_SYNC_LOCATION_REFRESH_DAYS", 85);
 const PAGE_SIZE = 50;
 
 export const normalizeName = (value: string) =>
@@ -134,7 +143,7 @@ export class KhcMasterService implements OnModuleInit, OnModuleDestroy {
   async isFresh(
     kind: string,
     parentId: number,
-    ageMs: number = maxAgeMs()
+    ageMs: number = maxAgeMs(kind)
   ): Promise<boolean> {
     if (!this.ready || !this.pool) return false;
     try {
@@ -167,7 +176,7 @@ export class KhcMasterService implements OnModuleInit, OnModuleDestroy {
       const stored = await this.pool.query(
         `SELECT last_synced_at > NOW() - ($3 || ' milliseconds')::interval AS fresh
          FROM khc_sync_state WHERE kind = $1 AND parent_id = $2`,
-        [kind, parentId, String(maxAgeMs())]
+        [kind, parentId, String(maxAgeMs(kind))]
       );
       if (!stored.rowCount || (!allowStale && !stored.rows[0].fresh)) return null;
       const needle = normalizeName(name).replace(/[\\%_]/g, "\\$&");
@@ -215,7 +224,7 @@ export class KhcMasterService implements OnModuleInit, OnModuleDestroy {
       const stored = await this.pool.query(
         `SELECT last_synced_at > NOW() - ($3 || ' milliseconds')::interval AS fresh
          FROM khc_sync_state WHERE kind = $1 AND parent_id = $2`,
-        [kind, parentId, String(maxAgeMs())]
+        [kind, parentId, String(maxAgeMs(kind))]
       );
       if (!stored.rowCount || (!allowStale && !stored.rows[0].fresh)) return null;
       const { rows } = await this.pool.query(
@@ -430,7 +439,7 @@ export class KhcMasterService implements OnModuleInit, OnModuleDestroy {
             OR s.last_synced_at < NOW() - ($2 || ' milliseconds')::interval
          ORDER BY s.last_synced_at NULLS FIRST, p.id
          LIMIT $3`,
-        [childKind, String(refreshAgeMs()), limit]
+        [childKind, String(refreshAgeMs(childKind)), limit]
       );
       return rows.map((row) => Number(row.id));
     } catch {
