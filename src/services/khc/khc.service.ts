@@ -397,8 +397,8 @@ export class KhcService {
     }
     const params: Values = reference.parent
       ? {
-          [reference.parent]: positiveId(parentId, reference.parent),
-        }
+        [reference.parent]: positiveId(parentId, reference.parent),
+      }
       : {};
     const data = await this.request(
       "GET",
