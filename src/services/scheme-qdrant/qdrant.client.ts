@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { DEFAULT_COLLECTION } from './scheme-registry';
 import { SchemeSearchHit, classifyChunkSection } from './scheme-query.util';
+import { AdvisoryHit } from '../advisory-qdrant/advisory-qdrant.util';
 
 /**
  * Qdrant REST client for scheme document vector search only.
@@ -127,6 +128,87 @@ export class QdrantClientService {
     );
 
     return points.map((hit: any) => this.hitToResult(hit));
+  }
+
+  /** Collection advisory chunks are read from: ADVISORY_QDRANT_COLLECTION_NAME, else the provider's own. */
+  getAdvisoryCollectionName(): string {
+    return process.env.ADVISORY_QDRANT_COLLECTION_NAME || this.getCollectionName();
+  }
+
+  /**
+   * Dense vector search over advisory chunks only (document_kind=advisory).
+   * Unlike querySchemePoints there is no type=scheme or scheme_code filter.
+   */
+  async queryAdvisoryPoints(
+    vector: number[],
+    options: { limit?: number; collectionName?: string } = {},
+  ): Promise<AdvisoryHit[]> {
+    const baseUrl = this.getUrl();
+    if (!baseUrl) {
+      throw new Error('QDRANT_URL is not configured for knowledge-advisory');
+    }
+
+    const collection = options.collectionName || this.getAdvisoryCollectionName();
+    const limit = options.limit ?? 40;
+    const url = `${baseUrl}/collections/${encodeURIComponent(collection)}/points/query`;
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const apiKey = this.getApiKey();
+    if (apiKey) {
+      headers['api-key'] = apiKey;
+    }
+
+    const started = Date.now();
+    const response = await axios.post(
+      url,
+      {
+        query: vector,
+        filter: { must: [{ key: 'document_kind', match: { value: 'advisory' } }] },
+        limit,
+        with_payload: true,
+      },
+      { headers, timeout: this.getTimeoutMs(), validateStatus: () => true },
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+      this.logger.error(
+        `[advisory-qdrant] Qdrant query failed collection=${collection} httpStatus=${response.status}`,
+      );
+      throw new Error(
+        `Qdrant query failed HTTP ${response.status}: ${JSON.stringify(response.data).slice(0, 400)}`,
+      );
+    }
+
+    const points =
+      response.data?.result?.points ?? response.data?.result ?? response.data?.points ?? [];
+    if (!Array.isArray(points)) {
+      this.logger.warn(`[advisory-qdrant] Unexpected Qdrant response shape collection=${collection}`);
+      return [];
+    }
+
+    this.logger.debug(
+      `[advisory-qdrant] Qdrant query collection=${collection} limit=${limit} hits=${points.length} elapsedMs=${
+        Date.now() - started
+      }`,
+    );
+    return points.map((point: any) => this.advisoryHitFromPoint(point));
+  }
+
+  private advisoryHitFromPoint(point: any): AdvisoryHit {
+    const payload = point?.payload || {};
+    const popId = payload.pop_id;
+    return {
+      score: Number(point?.score ?? 0),
+      text: String(payload.text ?? ''),
+      doc_id: String(payload.doc_id ?? ''),
+      chunk_id: String(payload.chunk_id ?? ''),
+      pop_id: popId === undefined || popId === null ? undefined : popId,
+      section: String(payload.section ?? ''),
+      title: String(payload.title_en || payload.name_en || ''),
+      crop: String(payload.crop ?? ''),
+      institute: String(payload.institute ?? ''),
+      creator: String(payload.creator ?? ''),
+    };
   }
 
   private hitToResult(hit: any): SchemeSearchHit {
