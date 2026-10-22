@@ -101,9 +101,9 @@ export class AppController {
     switch (route) {
       case "knowledge-advisory":
         this.logger.log("Inside Knowledge Advisory search");
-        // ADVISORY_BACKEND=qdrant searches docs-pipeline advisory chunks in Qdrant;
-        // anything else keeps the legacy Marqo path.
-        if ((process.env.ADVISORY_BACKEND || "marqo").trim().toLowerCase() === "qdrant") {
+        // Default: search docs-pipeline advisory chunks in Qdrant.
+        // ADVISORY_BACKEND=marqo falls back to the legacy Marqo path.
+        if ((process.env.ADVISORY_BACKEND || "qdrant").trim().toLowerCase() !== "marqo") {
           return this.advisoryQdrantService.search(body);
         }
         return this.appService.searchForIntentQuery(body);

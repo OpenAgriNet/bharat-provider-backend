@@ -63,7 +63,7 @@ $ npm run test:cov
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ADVISORY_BACKEND` | `marqo` | `qdrant` serves advisory from Qdrant; anything else keeps the legacy Marqo path. |
+| `ADVISORY_BACKEND` | `qdrant` | Advisory is served from Qdrant. Set `marqo` to fall back to the legacy Marqo path. |
 | `ADVISORY_QDRANT_COLLECTION_NAME` | `QDRANT_COLLECTION_NAME` | Collection holding advisory chunks (sandbox: `document-data`; production: the PROD collection). |
 | `ADVISORY_QDRANT_TOP_K` | `5` | Maximum advisory entries returned (best chunk per advisory entry). |
 

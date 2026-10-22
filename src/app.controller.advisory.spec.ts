@@ -26,17 +26,18 @@ describe('mobility/search knowledge-advisory routing', () => {
     else process.env.ADVISORY_BACKEND = saved;
   });
 
-  it('uses the legacy Marqo path when ADVISORY_BACKEND is unset', async () => {
+  it('uses the Qdrant advisory service when ADVISORY_BACKEND is unset', async () => {
     delete process.env.ADVISORY_BACKEND;
     const controller = makeController();
-    expect(await controller.getContentFromIcar1(BODY)).toBe('marqo-result');
-    expect(controller.advisoryQdrantService.search).not.toHaveBeenCalled();
+    expect(await controller.getContentFromIcar1(BODY)).toBe('qdrant-result');
+    expect(controller.appService.searchForIntentQuery).not.toHaveBeenCalled();
   });
 
   it('uses the legacy Marqo path when ADVISORY_BACKEND=marqo', async () => {
     process.env.ADVISORY_BACKEND = 'marqo';
     const controller = makeController();
     expect(await controller.getContentFromIcar1(BODY)).toBe('marqo-result');
+    expect(controller.advisoryQdrantService.search).not.toHaveBeenCalled();
   });
 
   it('uses the Qdrant advisory service when ADVISORY_BACKEND=qdrant', async () => {
