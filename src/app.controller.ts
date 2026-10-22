@@ -24,6 +24,7 @@ import { PmfbyGrievanceService } from "./services/pmfby/pmfby-greviance.service"
 import { SathiService } from "./services/sathi/sathi.service";
 import { SmamService } from "./services/smam/smam.service";
 import { SchemeQdrantService } from "./services/scheme-qdrant/scheme-qdrant.service";
+import { AdvisoryQdrantService } from "./services/advisory-qdrant/advisory-qdrant.service";
 import { AgristackService } from "./services/agristack/agristack.service";
 import { KhcService } from "./services/khc/khc.service";
 import { LoggerService } from './services/logger/logger.service';
@@ -39,6 +40,7 @@ export class AppController {
     private readonly sathiSeedService: SathiService,
     private readonly smamService: SmamService,
     private readonly schemeQdrantService: SchemeQdrantService,
+    private readonly advisoryQdrantService: AdvisoryQdrantService,
     private readonly agristackService: AgristackService,
     private readonly logger: LoggerService,
     private readonly khcService: KhcService) { }
@@ -99,6 +101,11 @@ export class AppController {
     switch (route) {
       case "knowledge-advisory":
         this.logger.log("Inside Knowledge Advisory search");
+        // Default: search docs-pipeline advisory chunks in Qdrant.
+        // ADVISORY_BACKEND=marqo falls back to the legacy Marqo path.
+        if ((process.env.ADVISORY_BACKEND || "qdrant").trim().toLowerCase() !== "marqo") {
+          return this.advisoryQdrantService.search(body);
+        }
         return this.appService.searchForIntentQuery(body);
 
       case "weather-forecast":

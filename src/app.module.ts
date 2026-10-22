@@ -33,6 +33,7 @@ import { PmkisanGrievanceService } from "./services/pmkisan-grievance/pmkisan-gr
 import { SathiService } from "./services/sathi/sathi.service";
 import { SmamService } from "./services/smam/smam.service";
 import { SchemeQdrantService } from "./services/scheme-qdrant/scheme-qdrant.service";
+import { AdvisoryQdrantService } from "./services/advisory-qdrant/advisory-qdrant.service";
 import { EmbeddingService } from "./services/scheme-qdrant/embedding.service";
 import { QdrantClientService } from "./services/scheme-qdrant/qdrant.client";
 import { SchemeCatalogService } from "./services/scheme-qdrant/scheme-catalog.service";
@@ -92,6 +93,7 @@ import { KhcMasterSyncService } from "./services/khc/khc-master-sync.service";
     QdrantClientService,
     SchemeCatalogService,
     SchemeQdrantService,
+    AdvisoryQdrantService,
     AifService,
     AifSessionStore,
     KccService,
