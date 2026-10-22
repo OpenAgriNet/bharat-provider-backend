@@ -10,7 +10,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * one parent at a time, and a failed list is skipped (the old rows stay), so a run can
  * be repeated or interrupted safely.
  *   KHC_SYNC_ENABLED=false          turn the jobs off
- *   KHC_SYNC_ON_START=true          run both jobs once in the background at startup
+ *   KHC_SYNC_ON_START=true          at startup, run each job only if it has not finished within the
+ *                                   refresh age (restarts do not repeat it); =force always runs
  *   KHC_SYNC_GRIEVANCE_CRON         schemes/categories/sub-categories (default 1st of the month 02:00)
  *   KHC_SYNC_LOCATION_CRON          states..villages (default 1st of the month 03:00)
  *   KHC_VILLAGE_BATCH               sub-districts whose villages are fetched per run (default 1000);
@@ -28,12 +29,20 @@ export class KhcMasterSyncService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    if (process.env.KHC_SYNC_ON_START === "true") {
+    const mode = process.env.KHC_SYNC_ON_START;
+    if (mode === "true" || mode === "force") {
       // Wait for KhcMasterService.onModuleInit to finish before using the DB.
-      setTimeout(() => {
-        void this.syncGrievanceTree().then(() => this.syncLocationTree());
-      }, 5000);
+      setTimeout(() => void this.startupSync(mode === "force"), 5000);
     }
+  }
+
+  /**
+   * Runs both jobs at startup. Unless forced, a job that finished within the refresh age is
+   * skipped, so restarting the provider does not call KHC again.
+   */
+  async startupSync(force = false): Promise<void> {
+    await this.syncGrievanceTree(!force);
+    await this.syncLocationTree(!force);
   }
 
   @Cron(process.env.KHC_SYNC_GRIEVANCE_CRON || "0 0 2 1 * *")
@@ -47,8 +56,8 @@ export class KhcMasterSyncService implements OnModuleInit {
   }
 
   /** states -> schemes -> categories -> sub-categories */
-  async syncGrievanceTree(): Promise<void> {
-    await this.run("grievance", async (pull) => {
+  async syncGrievanceTree(onlyIfDue = false): Promise<void> {
+    await this.run("grievance", onlyIfDue, async (pull) => {
       await pull("states", 0, true);
       for (const stateId of await this.master.staleParents("states", "schemes", 1000)) {
         await pull("schemes", stateId);
@@ -63,8 +72,8 @@ export class KhcMasterSyncService implements OnModuleInit {
   }
 
   /** states -> districts -> sub-districts -> villages (villages in batches) */
-  async syncLocationTree(): Promise<void> {
-    await this.run("location", async (pull) => {
+  async syncLocationTree(onlyIfDue = false): Promise<void> {
+    await this.run("location", onlyIfDue, async (pull) => {
       const batch = Math.max(1, parseInt(process.env.KHC_VILLAGE_BATCH || "1000", 10) || 1000);
       await pull("states", 0, true);
       for (const stateId of await this.master.staleParents("states", "districts", 1000)) {
@@ -81,6 +90,7 @@ export class KhcMasterSyncService implements OnModuleInit {
 
   private async run(
     name: string,
+    onlyIfDue: boolean,
     job: (pull: (kind: string, parentId: number, skipIfFresh?: boolean) => Promise<void>) => Promise<void>
   ): Promise<void> {
     if (process.env.KHC_SYNC_ENABLED === "false" || !this.master.isReady()) return;
@@ -89,9 +99,18 @@ export class KhcMasterSyncService implements OnModuleInit {
       this.logger.log(`KHC ${name} sync skipped: another run holds the lock`);
       return;
     }
+    if (onlyIfDue) {
+      const last = await this.master.lastJobRun(name);
+      if (last && Date.now() - new Date(last.at).getTime() < refreshAgeMs()) {
+        this.logger.log(`KHC ${name} sync skipped: last ran ${new Date(last.at).toISOString()}`);
+        await release();
+        return;
+      }
+    }
     const delay = parseInt(process.env.KHC_SYNC_DELAY_MS || "100", 10) || 0;
     let fetched = 0;
     let failed = 0;
+    let aborted = false;
     const started = Date.now();
     const pull = async (kind: string, parentId: number, skipIfFresh = false) => {
       if (skipIfFresh && (await this.master.isFresh(kind, parentId, refreshAgeMs()))) return;
@@ -112,8 +131,14 @@ export class KhcMasterSyncService implements OnModuleInit {
     try {
       await job(pull);
     } catch (error) {
+      aborted = true;
       this.logger.error(`KHC ${name} sync aborted: ${(error as Error).message}`);
     } finally {
+      await this.master.recordJobRun(name, aborted ? "aborted" : failed ? "partial" : "ok", {
+        fetched,
+        failed,
+        seconds: Math.round((Date.now() - started) / 1000),
+      });
       await release();
       this.logger.log(
         `KHC ${name} sync finished lists=${fetched} failed=${failed} seconds=${Math.round((Date.now() - started) / 1000)}`

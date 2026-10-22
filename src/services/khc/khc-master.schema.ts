@@ -37,6 +37,12 @@ export const KHC_MASTER_DDL = `
   ${list("khc_scheme", "")}
   ${list("khc_category", "")}
   ${list("khc_sub_category", "")}
+  CREATE TABLE IF NOT EXISTS khc_sync_job (
+    name         TEXT        PRIMARY KEY,
+    last_run_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status       TEXT        NOT NULL,
+    details      JSONB
+  );
   CREATE TABLE IF NOT EXISTS khc_sync_state (
     kind            TEXT        NOT NULL,
     parent_id       BIGINT      NOT NULL DEFAULT 0,

@@ -459,7 +459,7 @@ export class KhcService {
 
     // DB first. A miss, a stale list, or a name the cache does not know all go to the API.
     const cached = await this.master?.read(kind, parent ?? 0, name, pageNumber);
-    if (cached && !(name && cached.total === 0)) return { ...cached };
+    if (cached && cached.total > 0) return { ...cached };
 
     let data: Values[];
     try {

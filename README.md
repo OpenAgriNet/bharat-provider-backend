@@ -100,7 +100,8 @@ Reference lists (states, districts, sub-districts, villages, schemes, categories
 sub-categories) are cached in Postgres. Lookups read the DB first and fall back to the
 KHC API when a list is missing, older than 35 days, or the DB is down; stale data is
 served if the API is also down. A monthly cron (1st of the month, 02:00 schemes/categories,
-03:00 locations) keeps it warm.
+03:00 locations) keeps it warm. Each finished run is remembered in `khc_sync_job`, so
+restarting the provider does not call KHC again.
 
 Like the mandi cache, it needs no setup script: the `khc_*` tables are created at startup
 in the database the provider already uses (`IMD_DB_*`). Nothing to configure; override
@@ -113,7 +114,8 @@ through the API.
 # KHC_MASTER_MAX_AGE_DAYS=35        # how long a stored list is trusted by reads
 # KHC_SYNC_REFRESH_DAYS=25          # the cron re-fetches lists older than this (keep below the cron gap)
 # KHC_SYNC_ENABLED=false            # turn the cron off
-# KHC_SYNC_ON_START=true            # seed once in the background after startup
+# KHC_SYNC_ON_START=true            # at startup, run a job only if it has not finished in the last 25 days
+# KHC_SYNC_ON_START=force           # always run at startup (e.g. to load the remaining villages)
 # KHC_SYNC_GRIEVANCE_CRON="0 0 2 1 * *"   KHC_SYNC_LOCATION_CRON="0 0 3 1 * *"
 # KHC_VILLAGE_BATCH=1000            # sub-districts whose villages load per monthly run
 ```

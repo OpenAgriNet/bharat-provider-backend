@@ -55,7 +55,7 @@ suite("KhcMasterService + DB-first getReference (real Postgres)", () => {
     jest.resetAllMocks();
     jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
     await admin.query(
-      "TRUNCATE khc_state, khc_district, khc_sub_district, khc_village, khc_scheme, khc_category, khc_sub_category, khc_sync_state"
+      "TRUNCATE khc_state, khc_district, khc_sub_district, khc_village, khc_scheme, khc_category, khc_sub_category, khc_sync_state, khc_sync_job"
     );
     service = new KhcService(
       new ConfigService({ KHC_BASE_URL: "https://khc.test/api", KHC_API_KEY: "k" }),
@@ -210,6 +210,19 @@ suite("KhcMasterService + DB-first getReference (real Postgres)", () => {
     expect(await master.staleParents("states", "schemes", 10)).toEqual([]);
   });
 
+  it("an empty list is recorded as synced and not fetched again; the job run is remembered", async () => {
+    await master.store("villages", 77, "villageid", "villagename", []);
+    expect(await master.isFresh("villages", 77)).toBe(true);
+    await master.store("states", 0, "stateid", "statename", [{ stateid: 9, statename: "Uttar Pradesh" }]);
+    await master.store("sub-districts", 9, "subdistrictid", "subdistrictname", [{ subdistrictid: 77, subdistrictname: "Empty Block" }]);
+    expect(await master.staleParents("sub-districts", "villages", 10)).toEqual([]);
+    expect(await master.lastJobRun("location")).toBeNull();
+    await master.recordJobRun("location", "ok", { fetched: 3 });
+    expect((await master.lastJobRun("location"))?.status).toBe("ok");
+    await master.recordJobRun("location", "aborted", {});
+    expect(await master.lastJobRun("location")).toBeNull(); // an aborted run does not count
+  });
+
   it("only one sync can hold the lock", async () => {
     const release = await master.lockSync();
     expect(release).not.toBeNull();
@@ -274,7 +287,7 @@ suite("village-first location lookup and grievance tree (real Postgres)", () => 
   afterAll(async () => { await master.onModuleDestroy(); await admin.end(); });
   beforeEach(async () => {
     jest.resetAllMocks();
-    await admin.query("TRUNCATE khc_state, khc_district, khc_sub_district, khc_village, khc_scheme, khc_category, khc_sub_category, khc_sync_state");
+    await admin.query("TRUNCATE khc_state, khc_district, khc_sub_district, khc_village, khc_scheme, khc_category, khc_sub_category, khc_sync_state, khc_sync_job");
     service = new KhcService(new ConfigService({ KHC_BASE_URL: "https://khc.test/api", KHC_API_KEY: "k" }), master);
   });
 
@@ -389,7 +402,7 @@ suite("several villages with the same name (real Postgres)", () => {
   afterAll(async () => { await master.onModuleDestroy(); await admin.end(); });
   beforeEach(async () => {
     jest.resetAllMocks();
-    await admin.query("TRUNCATE khc_state, khc_district, khc_sub_district, khc_village, khc_scheme, khc_category, khc_sub_category, khc_sync_state");
+    await admin.query("TRUNCATE khc_state, khc_district, khc_sub_district, khc_village, khc_scheme, khc_category, khc_sub_category, khc_sync_state, khc_sync_job");
     service = new KhcService(new ConfigService({ KHC_BASE_URL: "https://khc.test/api", KHC_API_KEY: "k" }), master);
     await master.store("states", 0, "stateid", "statename", [{ stateid: 9, statename: "Uttar Pradesh" }]);
     await master.store("districts", 9, "districtid", "districtname", [

@@ -320,7 +320,20 @@ export class KhcMasterService implements OnModuleInit, OnModuleDestroy {
     rows: Values[]
   ): Promise<void> {
     const table = TABLES[kind];
-    if (!table || !this.ready || !this.pool || !rows.length) return;
+    if (!table || !this.ready || !this.pool) return;
+    if (!rows.length) {
+      // A genuinely empty list (e.g. a sub-district with no villages) is still "synced", otherwise
+      // every sync would fetch it again. Existing rows are left alone.
+      await this.pool
+        .query(
+          `INSERT INTO khc_sync_state (kind, parent_id, row_count, last_synced_at)
+           VALUES ($1, $2, 0, NOW())
+           ON CONFLICT (kind, parent_id) DO UPDATE SET row_count = 0, last_synced_at = NOW()`,
+          [kind, parentId]
+        )
+        .catch(() => undefined);
+      return;
+    }
     const ids = rows.map((row) => Number(row[idField]));
     if (!ids.every(Number.isSafeInteger)) return;
     const names = rows.map((row) => String(row[nameField]));
@@ -418,6 +431,34 @@ export class KhcMasterService implements OnModuleInit, OnModuleDestroy {
     } catch {
       return [];
     }
+  }
+
+  /** When a sync job last finished (ok or partial), so a restart does not repeat it. */
+  async lastJobRun(name: string): Promise<{ at: Date; status: string } | null> {
+    if (!this.ready || !this.pool) return null;
+    try {
+      const { rows } = await this.pool.query(
+        "SELECT last_run_at, status FROM khc_sync_job WHERE name = $1 AND status IN ('ok', 'partial')",
+        [name]
+      );
+      return rows[0] ? { at: rows[0].last_run_at, status: rows[0].status } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async recordJobRun(name: string, status: "ok" | "partial" | "aborted", details: Values): Promise<void> {
+    if (!this.ready || !this.pool) return;
+    await this.pool
+      .query(
+        `INSERT INTO khc_sync_job (name, last_run_at, status, details)
+         VALUES ($1, NOW(), $2, $3::jsonb)
+         ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), status = $2, details = $3::jsonb`,
+        [name, status, JSON.stringify(details)]
+      )
+      .catch((error) =>
+        this.logger.warn(`KHC sync job record failed: ${(error as Error).message}`)
+      );
   }
 
   /** Try to take the cluster-wide sync lock; returns a release function or null. */
