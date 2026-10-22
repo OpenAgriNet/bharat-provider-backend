@@ -1,7 +1,12 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios from "axios";
 import { buildAifResponse as buildResponse } from "../aif/aif-response";
+import { KhcMasterService, normalizeName } from "./khc-master.service";
+import { REFERENCES } from "./khc-references";
+import { KhcLookup, LookupError } from "./khc-lookup";
+
+export { REFERENCES };
 
 type Values = Record<string, unknown>;
 type Action = "on_init" | "on_status";
@@ -28,26 +33,6 @@ class KhcError extends Error {
   }
 }
 
-const REFERENCES: Record<
-  string,
-  { parent?: string; id: string; name: string }
-> = {
-  states: { id: "stateid", name: "statename" },
-  districts: { parent: "stateId", id: "districtid", name: "districtname" },
-  "sub-districts": {
-    parent: "districtId",
-    id: "subdistrictid",
-    name: "subdistrictname",
-  },
-  villages: { parent: "subDistrictId", id: "villageid", name: "villagename" },
-  schemes: { parent: "stateId", id: "scheme", name: "schemename" },
-  categories: { parent: "scheme", id: "problemcategory", name: "categoryname" },
-  "sub-categories": {
-    parent: "problemCategory",
-    id: "problemsubcategory",
-    name: "subcategoryname",
-  },
-};
 
 function record(value: unknown): value is Values {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -84,6 +69,23 @@ function positiveId(value: unknown, field: string): number {
   return number;
 }
 
+function optionalText(input: Values, field: string, maxLength: number): string | undefined {
+  return input[field] === undefined || input[field] === ""
+    ? undefined
+    : text(input, field, maxLength);
+}
+
+function optionalId(value: unknown, field: string): number | undefined {
+  return value === undefined || value === "" ? undefined : positiveId(value, field);
+}
+
+const listOf = (result: Values) =>
+  Object.entries(result).map(([code, value]) => ({
+    code,
+    name: code,
+    value: JSON.stringify(value),
+  }));
+
 @Injectable()
 export class KhcService {
   private readonly logger = new Logger(KhcService.name);
@@ -99,7 +101,17 @@ export class KhcService {
   >();
   private readonly verificationWindowMs = 5 * 60 * 1000;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly master?: KhcMasterService
+  ) {
+    this.lookup = new KhcLookup({
+      listAll: (kind, parentId) => this.listAll(kind, parentId),
+      master,
+    });
+  }
+
+  readonly lookup: KhcLookup;
 
   private async request(
     method: "GET" | "POST",
@@ -321,12 +333,8 @@ export class KhcService {
     return result.isRegistered;
   }
 
-  async getReference(
-    kind: string,
-    parentId?: unknown,
-    name = "",
-    page: unknown = 1
-  ): Promise<Values> {
+  /** Full list from the KHC API for one reference kind (no cache). */
+  async fetchReferenceRows(kind: string, parentId?: unknown): Promise<Values[]> {
     const reference = REFERENCES[kind];
     if (!Object.prototype.hasOwnProperty.call(REFERENCES, kind)) {
       throw new KhcError("Unknown KHC reference list.", "invalid_request");
@@ -336,7 +344,6 @@ export class KhcService {
           [reference.parent]: positiveId(parentId, reference.parent),
         }
       : {};
-    const pageNumber = positiveId(page, "page");
     const data = await this.request(
       "GET",
       `/v1/state/reference/${kind}`,
@@ -355,19 +362,83 @@ export class KhcService {
     ) {
       throw new KhcError("KHC returned an invalid reference list.");
     }
-    const normalizeName = (value: string) =>
-      value.toLocaleLowerCase().replace(/\s+/g, "");
+    return data as Values[];
+  }
+
+  /** A whole reference list: DB first, then the KHC API (saved), then stale DB if the API is down. */
+  async listAll(kind: string, parentId?: number): Promise<Values[]> {
+    const cached = await this.master?.readAll(kind, parentId ?? 0);
+    if (cached) return cached;
+    try {
+      const rows = await this.fetchReferenceRows(kind, parentId);
+      await this.master?.store(
+        kind,
+        parentId ?? 0,
+        REFERENCES[kind].id,
+        REFERENCES[kind].name,
+        rows
+      );
+      return rows;
+    } catch (error) {
+      const stale = await this.master?.readAll(kind, parentId ?? 0, true);
+      if (stale) return stale;
+      throw error;
+    }
+  }
+
+  async getReference(
+    kind: string,
+    parentId?: unknown,
+    name = "",
+    page: unknown = 1
+  ): Promise<Values> {
+    const reference = REFERENCES[kind];
+    if (!Object.prototype.hasOwnProperty.call(REFERENCES, kind)) {
+      throw new KhcError("Unknown KHC reference list.", "invalid_request");
+    }
+    const parent = reference.parent
+      ? positiveId(parentId, reference.parent)
+      : undefined;
+    const pageNumber = positiveId(page, "page");
+
+    // DB first. A miss, a stale list, or a name the cache does not know all go to the API.
+    const cached = await this.master?.read(kind, parent ?? 0, name, pageNumber);
+    if (cached && !(name && cached.total === 0)) return { ...cached };
+
+    let data: Values[];
+    try {
+      data = await this.fetchReferenceRows(kind, parent);
+    } catch (error) {
+      const fallback =
+        cached ?? (await this.master?.read(kind, parent ?? 0, name, pageNumber, true));
+      if (fallback) {
+        this.logger.warn(`KHC reference ${kind} served from cache after API failure`);
+        return { ...fallback };
+      }
+      throw error;
+    }
+    await this.master?.store(kind, parent ?? 0, reference.id, reference.name, data);
+
     const needle = normalizeName(name);
     const matches = data.filter(
-      (row) =>
-        !needle ||
-        normalizeName(String(row[reference.name])).includes(needle)
+      (row) => !needle || normalizeName(String(row[reference.name])).includes(needle)
     );
     return {
       options: matches.slice((pageNumber - 1) * 50, pageNumber * 50),
       total: matches.length,
       page: pageNumber,
     };
+  }
+
+  private async lookupOrFail<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof LookupError) {
+        throw new KhcError(error.message, "invalid_request");
+      }
+      throw error;
+    }
   }
 
   async getStatus(grievanceNo: string): Promise<Values> {
@@ -491,6 +562,38 @@ export class KhcService {
               name: code,
               value: JSON.stringify(value),
             })),
+          });
+        }
+        if (values.request_type === "find_location") {
+          const result = await this.lookupOrFail(() =>
+            this.lookup.findLocation({
+              name: text(values, "name", 200),
+              stateId: optionalId(values.state_id, "state_id"),
+              stateName: optionalText(values, "state_name", 100),
+              districtId: optionalId(values.district_id, "district_id"),
+              districtName: optionalText(values, "district_name", 100),
+            })
+          );
+          return buildResponse(body, action, {
+            code: "khc_location",
+            name: "KHC location",
+            short_desc: "Matching places with their state, district and block.",
+            list: listOf(result),
+          });
+        }
+        if (values.request_type === "grievance_tree") {
+          const result = await this.lookupOrFail(() =>
+            this.lookup.grievanceTree({
+              stateId: optionalId(values.state_id, "state_id"),
+              stateName: optionalText(values, "state_name", 100),
+              scheme: optionalText(values, "scheme_name", 100),
+            })
+          );
+          return buildResponse(body, action, {
+            code: "khc_grievance_tree",
+            name: "KHC grievance options",
+            short_desc: "Schemes, categories and sub-categories for the state.",
+            list: listOf(result),
           });
         }
         if (values.request_type === "get_otp") {

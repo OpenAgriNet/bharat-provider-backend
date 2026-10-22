@@ -82,6 +82,41 @@ The key is sent as `Authorization: ApiKey <key>`. Do not include the `ApiKey`
 prefix in `KHC_API_KEY`. The UAT host sends real SMS; production requires a
 separate base URL and key. No cookie copied from a browser is needed.
 
+### KHC master data cache
+
+Reference lists (states, districts, sub-districts, villages, schemes, categories,
+sub-categories) are cached in Postgres. Lookups read the DB first and fall back to the
+KHC API when a list is missing, older than 35 days, or the DB is down; stale data is
+served if the API is also down. A monthly cron (1st of the month, 02:00 schemes/categories,
+03:00 locations) keeps it warm.
+
+Like the mandi cache, it needs no setup script: the `khc_*` tables are created at startup
+in the database the provider already uses (`IMD_DB_*`). Nothing to configure; override
+only if the cache should live elsewhere. Without DB settings everything still works
+through the API.
+
+```dotenv
+# KHC_DB_HOST= KHC_DB_PORT= KHC_DB_NAME= KHC_DB_USER= KHC_DB_PASSWORD= KHC_DB_SSL=   (default: IMD_DB_*)
+# KHC_MASTER_DB_ENABLED=false       # turn the cache off
+# KHC_MASTER_MAX_AGE_DAYS=35        # how long a stored list is trusted by reads
+# KHC_SYNC_REFRESH_DAYS=25          # the cron re-fetches lists older than this (keep below the cron gap)
+# KHC_SYNC_ENABLED=false            # turn the cron off
+# KHC_SYNC_ON_START=true            # seed once in the background after startup
+# KHC_SYNC_GRIEVANCE_CRON="0 0 2 1 * *"   KHC_SYNC_LOCATION_CRON="0 0 3 1 * *"
+# KHC_VILLAGE_BATCH=1000            # sub-districts whose villages load per monthly run
+```
+
+Two extra `/mobility/init` request types use the cache:
+
+| `request_type` | Inputs | Result tag |
+| --- | --- | --- |
+| `find_location` | `name`; optional `state_name`/`state_id`, `district_name`/`district_id` | `khc_location`: matches with state, district, block and village ids; `needs` says what to ask next when nothing matched |
+| `grievance_tree` | `state_name` or `state_id`; optional `scheme_name` | `khc_grievance_tree`: the state's schemes, or the named scheme's categories with sub-categories |
+
+Villages not reached by the cron are cached the first time someone asks for them. To
+run the DB tests: `KHC_TEST_DB_HOST=... KHC_TEST_DB_NAME=... KHC_TEST_DB_USER=...
+KHC_TEST_DB_PASSWORD=... npx jest src/services/khc`.
+
 Beckn requests use `provider.id = khc-agri`, item `khc-grievance`, and flat
 `message.order.fulfillments[0].customer.person.tags`:
 

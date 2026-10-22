@@ -42,6 +42,8 @@ import { KccService } from "./services/kcc/kcc.service";
 import { KccSessionStore } from "./services/kcc/kcc-session.store";
 import { AgristackService } from "./services/agristack/agristack.service";
 import { KhcService } from "./services/khc/khc.service";
+import { KhcMasterService } from "./services/khc/khc-master.service";
+import { KhcMasterSyncService } from "./services/khc/khc-master-sync.service";
 
 @Module({
   imports: [
@@ -95,7 +97,9 @@ import { KhcService } from "./services/khc/khc.service";
     KccService,
     KccSessionStore,
     AgristackService,
+    KhcMasterService,
     KhcService,
+    KhcMasterSyncService,
   ],
 })
 export class AppModule {}
