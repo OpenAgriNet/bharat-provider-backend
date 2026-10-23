@@ -97,10 +97,8 @@ interface CategoryNode {
 }
 
 /**
- * Best category + sub-category for a complaint by word overlap with their names. When the farmer
- * clearly named a category but no single sub-category clearly wins, returns that category with
- * subCategory null (the bot then offers only that category's sub-categories). Null when nothing
- * clearly fits. English only (the tool passes an English summary).
+ * Lexical hint retained for API consumers. The chat agent matches semantically against the
+ * full returned catalogue; a missing hint does not mean no category fits the complaint.
  */
 export function suggestCategory(
   concern: string,
@@ -139,8 +137,8 @@ export function suggestCategory(
 }
 
 /**
- * Best sub-category inside a category the farmer already chose. subCategory is null when no single
- * one clearly fits; the bot then lists only this category's sub-categories and asks.
+ * Lexical sub-category hint inside a chosen category. A null hint leaves semantic selection
+ * to the chat agent using the returned catalogue.
  */
 export function suggestSubCategory(
   concern: string,

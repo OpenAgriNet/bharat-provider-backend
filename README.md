@@ -96,6 +96,12 @@ separate base URL and key. No cookie copied from a browser is needed.
 
 ### KHC master data cache
 
+The grievance-tree response supplies the KHC category/sub-category catalogue,
+including IDs and parent-child relationships. The chat LLM matches complaints
+semantically against those returned values; there is no complaint synonym table.
+The existing `suggested` field remains an optional lexical hint for API
+compatibility. Its absence does not mean the farmer must select from a menu.
+
 Reference lists (states, districts, sub-districts, villages, schemes, categories,
 sub-categories) are cached in Postgres. Lookups read the DB first and fall back to the
 KHC API when a list is missing, too old, or the DB is down; stale data is served if the API

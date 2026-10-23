@@ -173,19 +173,43 @@ describe("suggestCategory", () => {
     expect(suggestCategory("fund disbursement issues", tree)?.category.id).toBe(41);
   });
 
+  it.each(["bank loan sanction issue", "Bank Loan Sanction Issues"])(
+    "matches %s against the full reported category list without guessing a sub-category",
+    (concern) => {
+      const categories = [
+        ...tree,
+        ...[
+          "Credit Guarantee Coverage Issues",
+          "Infrastructure Implementation Issues",
+          "Interest Subvention Issues",
+          "Monitoring & Reporting Issues",
+          "Nodal Agency / Department Issues",
+          "Portal / Technical Issues",
+          "Project Appraisal & Approval Issues",
+          "Registration & Application Issues",
+        ].map((name, index) => ({ id: 100 + index, name, subCategories: [] })),
+      ];
+      expect(categories).toHaveLength(10);
+      expect(suggestCategory(concern, categories)).toEqual({
+        category: { id: 39, name: "Bank Loan Sanction Issues" },
+        subCategory: null,
+      });
+    }
+  );
+
   it("the category name alone does not override a clearly matching sub-category", () => {
     const hit = suggestCategory("bank refused my loan", tree)!;
     expect(hit.category.id).toBe(39);
     expect(hit.subCategory?.id).toBe(1725);
   });
 
-  it("returns null when nothing clearly fits, so the list is shown", () => {
+  it("returns no lexical hint when keyword evidence is unclear", () => {
     expect(suggestCategory("my crop was damaged by rain", tree)).toBeNull();
     expect(suggestCategory("", tree)).toBeNull();
     expect(suggestCategory("delay", tree)).toBeNull(); // fits two sub-categories equally
   });
 
-  it("grievanceTree adds the suggestion only when a concern is given and it is clear", async () => {
+  it.each(["bank refused my loan", "loan refused", "loan denied"])("grievanceTree returns the full catalogue for '%s'", async (concern) => {
     const lookup = new KhcLookup({
       listAll: async (kind, parent) => {
         if (kind === "states") return [{ stateid: 9, statename: "Uttar Pradesh" }];
@@ -198,8 +222,14 @@ describe("suggestCategory", () => {
           .subCategories.map((x) => ({ problemsubcategory: x.id, subcategoryname: x.name }));
       },
     });
-    const withConcern = (await lookup.grievanceTree({ stateName: "Uttar Pradesh", scheme: "AIF", concern: "bank refused my loan" })) as any;
-    expect(withConcern.suggested.subCategory.id).toBe(1725);
+    const withConcern = await lookup.grievanceTree({ stateName: "Uttar Pradesh", scheme: "AIF", concern });
+    expect(withConcern.categories).toEqual(tree);
+    if (concern === "bank refused my loan") {
+      expect(withConcern.suggested).toEqual({
+        category: { id: 39, name: "Bank Loan Sanction Issues" },
+        subCategory: { id: 1725, name: "Bank refused loan under AIF" },
+      });
+    }
     const without = (await lookup.grievanceTree({ stateName: "Uttar Pradesh", scheme: "AIF" })) as any;
     expect(without.suggested).toBeUndefined();
     const vague = (await lookup.grievanceTree({ stateName: "Uttar Pradesh", scheme: "AIF", concern: "rain damaged crop" })) as any;
