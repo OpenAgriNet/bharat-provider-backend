@@ -165,7 +165,19 @@ export class KhcLookup {
         district = districts.find((row) => idOf("districts", row) === input.districtId);
       } else if (input.districtName) {
         const found = matchRows(districts, "districts", input.districtName);
-        if (found.length === 1) district = found[0];
+        if (found.length === 1) {
+          district = found[0];
+        } else {
+          // Nothing matched, or several did: let the farmer pick from the list instead of
+          // quietly searching the whole state with a district that was not understood.
+          const options = found.length ? found : districts;
+          return {
+            needs: "district",
+            state: stateRef,
+            matches: options.map((row) => ({ level: "district", ...ref("districts", row) })),
+            total: options.length,
+          };
+        }
       }
       if (district) districtRef = ref("districts", district);
       // The place may itself be a district.

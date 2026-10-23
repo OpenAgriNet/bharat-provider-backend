@@ -192,3 +192,37 @@ describe("suggestCategory", () => {
     expect(vague.categories).toHaveLength(2);
   });
 });
+
+describe("location: a district that did not match is listed, not ignored", () => {
+  const lookup = new KhcLookup({
+    listAll: async (kind) =>
+      ({
+        states: [{ stateid: 9, statename: "Uttar Pradesh" }],
+        districts: [
+          { districtid: 221, districtname: "Ghaziabad" },
+          { districtid: 222, districtname: "Ghazipur" },
+          { districtid: 223, districtname: "Meerut" },
+        ],
+        "sub-districts": [],
+      } as Record<string, Record<string, unknown>[]>)[kind] ?? [],
+  });
+
+  it("several districts match: only those are offered", async () => {
+    const result = (await lookup.findLocation({ name: "abupur", stateName: "Uttar Pradesh", districtName: "ghazi" })) as any;
+    expect(result.needs).toBe("district");
+    expect(result.matches.map((m: any) => m.name)).toEqual(["Ghaziabad", "Ghazipur"]);
+  });
+
+  it("nothing matches: the state's districts are offered", async () => {
+    const result = (await lookup.findLocation({ name: "abupur", stateName: "Uttar Pradesh", districtName: "zzzzzz" })) as any;
+    expect(result.needs).toBe("district");
+    expect(result.matches).toHaveLength(3);
+    expect(result.state).toMatchObject({ id: 9 });
+  });
+
+  it("one district matches (spelling and spacing ignored): carries on, nothing is listed", async () => {
+    const result = (await lookup.findLocation({ name: "abupur", stateName: "uttarpradesh", districtName: "MEERUT" })) as any;
+    expect(result.district).toEqual({ id: 223, name: "Meerut" });
+    expect(result.needs).toBe("geocode"); // district understood; this village is not in the fake data
+  });
+});
