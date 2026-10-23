@@ -164,6 +164,21 @@ describe("suggestCategory", () => {
     expect(suggestCategory("subsidy not received for 6 months", tree)?.subCategory.id).toBe(1801);
   });
 
+  it("a farmer who names the category gets that category even if no sub-category stands out", () => {
+    expect(suggestCategory("bank loan sanction issue", tree)).toEqual({
+      category: { id: 39, name: "Bank Loan Sanction Issues" },
+      subCategory: null,
+    });
+    // "issue" and "issues" are the same word
+    expect(suggestCategory("fund disbursement issues", tree)?.category.id).toBe(41);
+  });
+
+  it("the category name alone does not override a clearly matching sub-category", () => {
+    const hit = suggestCategory("bank refused my loan", tree)!;
+    expect(hit.category.id).toBe(39);
+    expect(hit.subCategory?.id).toBe(1725);
+  });
+
   it("returns null when nothing clearly fits, so the list is shown", () => {
     expect(suggestCategory("my crop was damaged by rain", tree)).toBeNull();
     expect(suggestCategory("", tree)).toBeNull();

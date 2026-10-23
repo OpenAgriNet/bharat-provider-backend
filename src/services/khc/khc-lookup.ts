@@ -56,8 +56,8 @@ const ref = (kind: string, row: Values) => ({ id: idOf(kind, row), name: nameOf(
 const STOPWORDS = new Set(
   "a an and are as at be been by for from has have i in is it me my not of on or so that the this to under was were with am no yet about".split(" ")
 );
-// Crude stem so "refused"/"refuses"/"refusing" compare equal.
-const stem = (word: string) => word.replace(/(ing|ed|es|s)$/, "");
+// Crude stem so "refused"/"refuses"/"refuse" and "issue"/"issues" compare equal.
+const stem = (word: string) => word.replace(/(ing|ed|es|s)$/, "").replace(/e$/, "");
 const tokens = (text: string) =>
   new Set(
     text
@@ -81,14 +81,18 @@ interface CategoryNode {
 }
 
 /**
- * Best category + sub-category for a complaint by word overlap with their names, or null when no
- * single pair clearly wins. English only (the tool passes an English summary); the caller falls
- * back to showing the list.
+ * Best category + sub-category for a complaint by word overlap with their names. When the farmer
+ * clearly named a category but no single sub-category clearly wins, returns that category with
+ * subCategory null (the bot then offers only that category's sub-categories). Null when nothing
+ * clearly fits. English only (the tool passes an English summary).
  */
 export function suggestCategory(
   concern: string,
   categories: CategoryNode[]
-): { category: { id: number; name: string }; subCategory: { id: number; name: string } } | null {
+): {
+  category: { id: number; name: string };
+  subCategory: { id: number; name: string } | null;
+} | null {
   const words = tokens(concern);
   if (!words.size) return null;
   const scored: { score: number; category: CategoryNode; sub: { id: number; name: string } }[] = [];
@@ -101,11 +105,21 @@ export function suggestCategory(
   scored.sort((a, b) => b.score - a.score);
   const [best, second] = scored;
   // At least a full sub-category match, or a strong partial plus its category, and a clear lead.
-  if (!best || best.score < 1.2 || (second && best.score - second.score < 0.4)) return null;
-  return {
-    category: { id: best.category.id, name: best.category.name },
-    subCategory: best.sub,
-  };
+  if (best && best.score >= 1.2 && !(second && best.score - second.score < 0.4)) {
+    return {
+      category: { id: best.category.id, name: best.category.name },
+      subCategory: best.sub,
+    };
+  }
+  // No sub-category stands out, but the farmer may have named the category itself.
+  const byCategory = categories
+    .map((category) => ({ category, score: overlap(words, category.name) }))
+    .sort((a, b) => b.score - a.score);
+  const [top, next] = byCategory;
+  if (top && top.score >= 0.75 && !(next && top.score - next.score < 0.3)) {
+    return { category: { id: top.category.id, name: top.category.name }, subCategory: null };
+  }
+  return null;
 }
 
 export class KhcLookup {
