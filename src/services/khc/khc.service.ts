@@ -645,6 +645,7 @@ export class KhcService {
               stateName: optionalText(values, "state_name", 100),
               scheme: optionalText(values, "scheme_name", 100),
               concern: optionalText(values, "concern", 500),
+              category: optionalText(values, "category_name", 100),
             })
           );
           return buildResponse(body, action, {

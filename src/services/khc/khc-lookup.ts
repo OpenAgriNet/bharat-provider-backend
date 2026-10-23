@@ -54,7 +54,7 @@ const ref = (kind: string, row: Values) => ({ id: idOf(kind, row), name: nameOf(
 
 
 const STOPWORDS = new Set(
-  "a an and are as at be been by for from has have i in is it me my not of on or so that the this to under was were with am no yet about".split(" ")
+  "a an and are as at be been by for from has have i in is it me my of on or so that the this to under was were with am yet about".split(" ")
 );
 // Crude stem so "refused"/"refuses"/"refuse" and "issue"/"issues" compare equal.
 const stem = (word: string) => word.replace(/(ing|ed|es|s)$/, "").replace(/e$/, "");
@@ -66,11 +66,27 @@ const tokens = (text: string) =>
       .filter((word) => word.length > 1 && !STOPWORDS.has(word))
       .map(stem)
   );
+/** Same word, or one typo apart (a wrong, missing or swapped letter): "recieved" ~ "received". */
+function near(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 5 || Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) {
+    const diff: number[] = [];
+    for (let i = 0; i < a.length && diff.length < 3; i++) if (a[i] !== b[i]) diff.push(i);
+    return (
+      diff.length === 1 ||
+      (diff.length === 2 && diff[1] === diff[0] + 1 && a[diff[0]] === b[diff[1]] && a[diff[1]] === b[diff[0]])
+    );
+  }
+  const [short, long] = a.length < b.length ? [a, b] : [b, a];
+  for (let i = 0; i < long.length; i++) if (long.slice(0, i) + long.slice(i + 1) === short) return true;
+  return false;
+}
 const overlap = (concern: Set<string>, name: string) => {
   const own = tokens(name);
   if (!own.size) return 0;
   let hit = 0;
-  for (const word of own) if (concern.has(word)) hit += 1;
+  for (const word of own) if ([...concern].some((said) => near(said, word))) hit += 1;
   return hit / own.size;
 };
 
@@ -120,6 +136,26 @@ export function suggestCategory(
     return { category: { id: top.category.id, name: top.category.name }, subCategory: null };
   }
   return null;
+}
+
+/**
+ * Best sub-category inside a category the farmer already chose. subCategory is null when no single
+ * one clearly fits; the bot then lists only this category's sub-categories and asks.
+ */
+export function suggestSubCategory(
+  concern: string,
+  category: CategoryNode
+): { category: { id: number; name: string }; subCategory: { id: number; name: string } | null } {
+  const words = tokens(concern);
+  const scored = category.subCategories
+    .map((sub) => ({ sub, score: words.size ? overlap(words, sub.name) : 0 }))
+    .sort((a, b) => b.score - a.score);
+  const [best, second] = scored;
+  const clear = !!best && best.score >= 0.6 && !(second && best.score - second.score < 0.25);
+  return {
+    category: { id: category.id, name: category.name },
+    subCategory: clear ? best.sub : null,
+  };
 }
 
 export class KhcLookup {
@@ -280,6 +316,8 @@ export class KhcLookup {
     stateName?: string;
     scheme?: string;
     concern?: string;
+    // A category the farmer picked from a list; the result is narrowed to it.
+    category?: string;
   }): Promise<Values> {
     const resolved = await this.resolveState(input.stateId, input.stateName);
     if (!resolved.state) {
@@ -316,6 +354,15 @@ export class KhcLookup {
       }))
     );
     const result: Values = { state, scheme: chosen, categories: tree };
+    if (input.category) {
+      const picked = matchRows(categories, "categories", input.category);
+      if (picked.length === 1) {
+        const node = tree.find((category) => category.id === idOf("categories", picked[0]))!;
+        result.categories = [node];
+        result.suggested = suggestSubCategory(input.concern ?? "", node);
+        return result;
+      }
+    }
     const suggested = input.concern ? suggestCategory(input.concern, tree) : null;
     if (suggested) result.suggested = suggested;
     return result;

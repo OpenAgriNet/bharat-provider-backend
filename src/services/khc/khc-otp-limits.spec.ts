@@ -2,7 +2,7 @@ import { ConfigService } from "@nestjs/config";
 import { Logger } from "@nestjs/common";
 import axios from "axios";
 import { KhcService } from "./khc.service";
-import { KhcLookup, suggestCategory } from "./khc-lookup";
+import { KhcLookup, suggestCategory, suggestSubCategory } from "./khc-lookup";
 
 jest.mock("axios");
 const http = axios as jest.Mocked<typeof axios>;
@@ -239,5 +239,59 @@ describe("location: a district that did not match is listed, not ignored", () =>
     const result = (await lookup.findLocation({ name: "abupur", stateName: "uttarpradesh", districtName: "MEERUT" })) as any;
     expect(result.district).toEqual({ id: 223, name: "Meerut" });
     expect(result.needs).toBe("geocode"); // district understood; this village is not in the fake data
+  });
+});
+
+describe("matching survives typos and keeps negations", () => {
+  const pm = [
+    { id: 50, name: "Delay in receiving benefit", subCategories: [
+      { id: 501, name: "Installment not received" },
+      { id: 502, name: "Benefits received in wrong account" },
+      { id: 503, name: "Payment delayed after approval" },
+    ] },
+    { id: 51, name: "Technical Issue with PM-KISAN Portal", subCategories: [{ id: 511, name: "Portal not opening" }] },
+  ];
+
+  it("'installment not recieved' (typo) matches 'Installment not received' straight away", () => {
+    expect(suggestCategory("installment not recieved", pm)).toEqual({
+      category: { id: 50, name: "Delay in receiving benefit" },
+      subCategory: { id: 501, name: "Installment not received" },
+    });
+  });
+
+  it("'not' is kept, so 'not received' is not confused with 'received in wrong account'", () => {
+    expect(suggestSubCategory("installment not received", pm[0]).subCategory?.id).toBe(501);
+    expect(suggestSubCategory("money received in wrong account", pm[0]).subCategory?.id).toBe(502);
+  });
+
+  it("a vague complaint inside a chosen category gives no sub-category, so the farmer is asked", () => {
+    expect(suggestSubCategory("problem with my money", pm[0]).subCategory).toBeNull();
+    expect(suggestSubCategory("", pm[0]).subCategory).toBeNull();
+    expect(suggestSubCategory("payment", pm[0]).category).toEqual({ id: 50, name: "Delay in receiving benefit" });
+  });
+
+  it("grievanceTree narrows to the picked category and picks the sub-category inside it", async () => {
+    const lookup = new KhcLookup({
+      listAll: async (kind, parent) => {
+        if (kind === "states") return [{ stateid: 9, statename: "Uttar Pradesh" }];
+        if (kind === "schemes") return [{ scheme: 40, schemename: "PM-KISAN", division: 32 }];
+        if (kind === "categories") return pm.map((c) => ({ problemcategory: c.id, categoryname: c.name }));
+        return pm.find((c) => c.id === parent)!.subCategories.map((x) => ({ problemsubcategory: x.id, subcategoryname: x.name }));
+      },
+    });
+    const picked = (await lookup.grievanceTree({
+      stateName: "Uttar Pradesh", scheme: "pm kisan", concern: "installment not received", category: "delay in receiving benefit",
+    })) as any;
+    expect(picked.categories).toHaveLength(1);
+    expect(picked.suggested.subCategory).toEqual({ id: 501, name: "Installment not received" });
+    const vague = (await lookup.grievanceTree({
+      stateName: "Uttar Pradesh", scheme: "pm kisan", concern: "problem with money", category: "Delay in receiving benefit",
+    })) as any;
+    expect(vague.suggested.subCategory).toBeNull();
+    expect(vague.categories[0].subCategories).toHaveLength(3);
+    const unknown = (await lookup.grievanceTree({
+      stateName: "Uttar Pradesh", scheme: "pm kisan", concern: "x", category: "no such category",
+    })) as any;
+    expect(unknown.categories).toHaveLength(2); // not narrowed
   });
 });
