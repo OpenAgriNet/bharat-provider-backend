@@ -2,22 +2,21 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EmbeddingService } from './embedding.service';
 import { QdrantClientService } from './qdrant.client';
 import { buildSchemeQdrantOnSearch } from './scheme-qdrant.catalog';
-import { SchemeCatalogService } from './scheme-catalog.service';
 import {
   classifyQueryIntent,
   classifySchemeSectionFocus,
   expandQueryForSearch,
-  filterResultsByScheme,
   finalizeResults,
-  isKnownSchemeCode,
-  queryNamesUnindexedScheme,
   rerankResults,
-  resolveSchemeCode,
   SchemeSearchHit,
 } from './scheme-query.util';
 
 /**
  * Vector-only scheme document search (Qdrant).
+ *
+ * Always an unfiltered semantic search: no scheme registry lookup and no scheme
+ * filter. Each returned chunk carries its own scheme code/name (from the Qdrant
+ * payload) and the caller decides which chunks answer the question.
  *
  * IMPORTANT: This path does NOT use Hasura / Postgres Content.
  * Structured Hasura scheme lookup remains on category code `schemes-agri`.
@@ -30,7 +29,6 @@ export class SchemeQdrantService {
   constructor(
     private readonly embeddingService: EmbeddingService,
     private readonly qdrantClient: QdrantClientService,
-    private readonly schemeCatalog: SchemeCatalogService,
   ) {}
 
   async search(body: any): Promise<any> {
@@ -38,12 +36,10 @@ export class SchemeQdrantService {
     const txn = context.transaction_id || context.message_id || '-';
     const started = Date.now();
 
-    const { query, schemeCodeHint, topK } = this.parseIntent(body);
+    const { query, topK } = this.parseIntent(body);
 
     this.logger.log(
-      `[scheme-qdrant] → txn=${txn} query=${JSON.stringify(query)} schemeHint=${
-        schemeCodeHint || '-'
-      } topK=${topK}`,
+      `[scheme-qdrant] → txn=${txn} query=${JSON.stringify(query)} topK=${topK}`,
     );
 
     if (!query?.trim()) {
@@ -82,50 +78,7 @@ export class SchemeQdrantService {
       });
     }
 
-    const schemeList = this.schemeCatalog.getSchemeList();
-
     try {
-      const knownSchemeCodes = this.schemeCatalog.getKnownSchemeCodes();
-      let schemeCode: string | null = null;
-      let schemeSource: 'hint' | 'resolved' | 'auto' = 'auto';
-
-      if (schemeCodeHint && isKnownSchemeCode(schemeCodeHint, knownSchemeCodes)) {
-        schemeCode = schemeCodeHint.toLowerCase();
-        schemeSource = 'hint';
-      } else {
-        schemeCode = resolveSchemeCode(query, schemeList);
-        if (schemeCode) schemeSource = 'resolved';
-      }
-
-      if (schemeCodeHint && schemeSource !== 'hint') {
-        this.logger.debug(
-          `[scheme-qdrant] txn=${txn} schemeHint=${schemeCodeHint} not in registry(size=${knownSchemeCodes.size}); falling back to query resolution`,
-        );
-      }
-
-      // Only short-circuit when the registry is actually loaded — an empty
-      // registry (master_catalog unreachable) must not be read as "no scheme
-      // matches", or every query would wrongly resolve to scheme_unavailable.
-      if (
-        !schemeCode &&
-        schemeList.length > 0 &&
-        queryNamesUnindexedScheme(query, schemeList)
-      ) {
-        this.logger.log(
-          `[scheme-qdrant] ← txn=${txn} status=scheme_unavailable reason=query_names_unindexed_scheme elapsedMs=${
-            Date.now() - started
-          }`,
-        );
-        return buildSchemeQdrantOnSearch({
-          context,
-          query,
-          resolvedSchemeCode: null,
-          results: [],
-          status: 'scheme_unavailable',
-          message: 'Scheme not available in the document index',
-        });
-      }
-
       const intent = classifyQueryIntent(query);
       const sectionFocus = classifySchemeSectionFocus(query);
       const expanded = expandQueryForSearch(query, intent, sectionFocus);
@@ -133,36 +86,14 @@ export class SchemeQdrantService {
 
       const queryVector = await this.embeddingService.embedQuery(expanded);
       let results = await this.qdrantClient.querySchemePoints(queryVector, {
-        schemeCode,
         limit: fetchK,
       });
-
-      // The resolved scheme_code may not match what's actually tagged on
-      // ingested chunks (registry/payload drift). Rather than returning
-      // nothing, fall back to searching by the query text alone across all
-      // scheme documents so a relevant answer still comes back.
-      let effectiveSchemeCode = schemeCode;
-      if (!results.length && schemeCode) {
-        this.logger.warn(
-          `[scheme-qdrant] txn=${txn} no hits for scheme_code=${schemeCode}; retrying unfiltered by query`,
-        );
-        results = await this.qdrantClient.querySchemePoints(queryVector, {
-          limit: fetchK,
-        });
-        effectiveSchemeCode = null;
-      }
 
       // Supplemental search when intent needs a missing section
       const supplemental = this.supplementalSearchConfig(sectionFocus, intent);
       if (supplemental) {
         const before = results.length;
-        results = await this.mergeSupplemental(
-          query,
-          results,
-          supplemental,
-          effectiveSchemeCode,
-          fetchK,
-        );
+        results = await this.mergeSupplemental(query, results, supplemental, fetchK);
         if (results.length > before) {
           this.logger.debug(
             `[scheme-qdrant] txn=${txn} supplemental=${supplemental.neededSection} addedHits=${
@@ -172,41 +103,33 @@ export class SchemeQdrantService {
         }
       }
 
-      results = filterResultsByScheme(results, effectiveSchemeCode, knownSchemeCodes);
       results = rerankResults(query, results);
       results = finalizeResults(results, sectionFocus, intent, topK);
 
       const elapsed = Date.now() - started;
-      const status = results.length ? 'success' : schemeCode ? 'not_found' : 'scheme_unavailable';
+      const status = results.length ? 'success' : 'not_found';
 
       this.logger.log(
-        `[scheme-qdrant] ← txn=${txn} scheme=${schemeCode || 'auto'}(${schemeSource}) effectiveScheme=${
-          effectiveSchemeCode || 'auto'
-        } intent=${
-          intent || '-'
-        } focus=${sectionFocus || '-'} hits=${results.length} status=${status} elapsedMs=${elapsed}`,
+        `[scheme-qdrant] ← txn=${txn} intent=${intent || '-'} focus=${
+          sectionFocus || '-'
+        } hits=${results.length} status=${status} elapsedMs=${elapsed}`,
       );
 
       if (!results.length) {
         return buildSchemeQdrantOnSearch({
           context,
           query,
-          resolvedSchemeCode: schemeCode,
           results: [],
           status,
-          message: schemeCode
-            ? 'Could not find this information in the document index'
-            : 'Scheme not available in the document index',
+          message: 'Could not find this information in the document index',
         });
       }
 
       return buildSchemeQdrantOnSearch({
         context,
         query,
-        resolvedSchemeCode: schemeCode,
         results,
         status: 'success',
-        schemeList,
       });
     } catch (err: any) {
       this.logger.error(
@@ -233,7 +156,6 @@ export class SchemeQdrantService {
 
   private parseIntent(body: any): {
     query: string;
-    schemeCodeHint: string | null;
     topK: number;
   } {
     const intent = body?.message?.intent;
@@ -241,7 +163,6 @@ export class SchemeQdrantService {
     const descriptor = item?.descriptor || {};
 
     let query = String(descriptor.name || '').trim();
-    let schemeCodeHint = String(descriptor.code || '').trim() || null;
     let topK = this.getDefaultTopK();
 
     const tags: any[] = Array.isArray(item?.tags) ? item.tags : [];
@@ -257,8 +178,6 @@ export class SchemeQdrantService {
         if (!value) continue;
         if (entryCode === 'query' || entryCode === 'search_value') {
           if (!query) query = value;
-        } else if (entryCode === 'scheme_code' || entryCode === 'scheme-code') {
-          if (!schemeCodeHint) schemeCodeHint = value;
         } else if (entryCode === 'top_k' || entryCode === 'topk') {
           const n = parseInt(value, 10);
           if (Number.isFinite(n)) topK = n;
@@ -269,8 +188,7 @@ export class SchemeQdrantService {
     // Clamp top_k
     topK = Math.min(Math.max(topK, 1), 20);
 
-    // If name looks like a bare scheme code and code empty, allow resolve via query
-    return { query, schemeCodeHint, topK };
+    return { query, topK };
   }
 
   private supplementalSearchConfig(
@@ -293,7 +211,6 @@ export class SchemeQdrantService {
     query: string,
     results: SchemeSearchHit[],
     supplemental: { neededSection: string; expansionKey: string },
-    schemeCode: string | null,
     fetchK: number,
   ): Promise<SchemeSearchHit[]> {
     if (results.some((r) => r.section === supplemental.neededSection)) {
@@ -312,7 +229,6 @@ export class SchemeQdrantService {
     const extraQuery = `${query} ${expansion}`.trim();
     const extraVector = await this.embeddingService.embedQuery(extraQuery);
     const extraHits = await this.qdrantClient.querySchemePoints(extraVector, {
-      schemeCode,
       limit: fetchK,
     });
 

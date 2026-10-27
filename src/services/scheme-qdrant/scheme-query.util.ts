@@ -3,7 +3,6 @@
  * Ported from bharat-oan-api/helpers/scheme_qdrant_search.py — no Hasura.
  */
 
-import { SchemeListItem } from './scheme-registry';
 
 export interface SchemeSearchHit {
   score: number;
@@ -15,54 +14,6 @@ export interface SchemeSearchHit {
   chunk_id?: string;
   section?: string;
 }
-
-const ALIAS_STOPWORDS = new Set([
-  'scheme',
-  'schemes',
-  'mission',
-  'national',
-  'programme',
-  'program',
-  'yojana',
-  'yojna',
-  'development',
-  'fund',
-  'for',
-  'the',
-  'and',
-  'under',
-  'government',
-  'india',
-  'ministry',
-  'guidelines',
-  'operational',
-]);
-
-const SCHEME_FOCUS_STOPWORDS = new Set([
-  ...ALIAS_STOPWORDS,
-  'what',
-  'who',
-  'how',
-  'when',
-  'where',
-  'why',
-  'which',
-  'about',
-  'farmer',
-  'farmers',
-  'criteria',
-  'details',
-  'information',
-  'available',
-  'tell',
-  'explain',
-  'know',
-  'need',
-  'want',
-  'there',
-  'this',
-  'that',
-]);
 
 const FARMER_TERMS = [
   'farmer',
@@ -239,66 +190,6 @@ const APP_UI_NOISE_TERMS = [
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function aliasInQuery(alias: string, query: string): boolean {
-  const a = alias.toLowerCase().trim();
-  if (!a) return false;
-  if (a.length <= 6 || a.includes('-')) {
-    return new RegExp(`\\b${escapeRegExp(a)}\\b`, 'i').test(query);
-  }
-  return query.includes(a);
-}
-
-export function resolveSchemeCode(
-  query: string,
-  schemeList: SchemeListItem[] = [],
-): string | null {
-  const q = query.toLowerCase();
-  let bestLen = 0;
-  let bestCode: string | null = null;
-
-  for (const item of schemeList) {
-    const candidates = [
-      item.scheme_code,
-      item.scheme_name,
-      ...(item.scheme_aliases || []),
-    ];
-    for (const candidate of candidates) {
-      const alias = String(candidate).toLowerCase().trim();
-      if (!alias || ALIAS_STOPWORDS.has(alias)) continue;
-      if (!aliasInQuery(alias, q)) continue;
-      if (alias.length > bestLen) {
-        bestLen = alias.length;
-        bestCode = item.scheme_code;
-      }
-    }
-  }
-  return bestCode;
-}
-
-function stripIntentTerms(query: string): string {
-  let cleaned = query.toLowerCase();
-  for (const terms of Object.values(INTENT_TERMS)) {
-    for (const term of [...terms].sort((a, b) => b.length - a.length)) {
-      cleaned = cleaned.split(term).join(' ');
-    }
-  }
-  for (const term of EXCLUSION_TERMS) {
-    cleaned = cleaned.split(term).join(' ');
-  }
-  return cleaned.replace(/\s+/g, ' ').trim();
-}
-
-export function queryNamesUnindexedScheme(
-  query: string,
-  schemeList: SchemeListItem[] = [],
-): boolean {
-  if (resolveSchemeCode(query, schemeList)) return false;
-  const tokens = stripIntentTerms(query)
-    .split(/[\s?,]+/)
-    .filter((t) => t.length >= 3 && !SCHEME_FOCUS_STOPWORDS.has(t));
-  return tokens.length > 0;
 }
 
 export function classifyQueryIntent(query: string): string | null {
@@ -690,34 +581,4 @@ export function rerankResults(
     };
     return scoreOf(b) - scoreOf(a);
   });
-}
-
-/**
- * `knownSchemeCodes` is the live master_catalog registry. When it's empty
- * (registry not yet loaded / DB unreachable) this skips the allow-list check
- * rather than dropping every result — see SchemeCatalogService's fail-open
- * design.
- */
-export function filterResultsByScheme(
-  results: SchemeSearchHit[],
-  schemeCode: string | null,
-  knownSchemeCodes: Set<string> = new Set(),
-): SchemeSearchHit[] {
-  if (schemeCode) {
-    return results.filter((r) => r.scheme_code === schemeCode);
-  }
-  if (knownSchemeCodes.size === 0) {
-    return results;
-  }
-  return results.filter(
-    (r) => r.scheme_code && knownSchemeCodes.has(r.scheme_code),
-  );
-}
-
-export function isKnownSchemeCode(
-  code: string | null | undefined,
-  knownSchemeCodes: Set<string>,
-): boolean {
-  if (!code) return false;
-  return knownSchemeCodes.has(code.toLowerCase());
 }

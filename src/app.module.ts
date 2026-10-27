@@ -36,7 +36,6 @@ import { SchemeQdrantService } from "./services/scheme-qdrant/scheme-qdrant.serv
 import { AdvisoryQdrantService } from "./services/advisory-qdrant/advisory-qdrant.service";
 import { EmbeddingService } from "./services/scheme-qdrant/embedding.service";
 import { QdrantClientService } from "./services/scheme-qdrant/qdrant.client";
-import { SchemeCatalogService } from "./services/scheme-qdrant/scheme-catalog.service";
 import { AifService } from "./services/aif/aif.service";
 import { AifSessionStore } from "./services/aif/aif-session.store";
 import { KccService } from "./services/kcc/kcc.service";
@@ -89,7 +88,6 @@ import { KhcService } from "./services/khc/khc.service";
     SmamService,
     EmbeddingService,
     QdrantClientService,
-    SchemeCatalogService,
     SchemeQdrantService,
     AdvisoryQdrantService,
     AifService,

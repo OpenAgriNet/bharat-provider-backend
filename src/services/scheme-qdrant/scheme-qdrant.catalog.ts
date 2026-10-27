@@ -1,10 +1,9 @@
-import { getStateDisplayName, SchemeListItem } from './scheme-registry';
+import { getStateDisplayName } from './scheme-registry';
 import { SchemeSearchHit } from './scheme-query.util';
 
 export type CatalogStatus =
   | 'success'
   | 'not_found'
-  | 'scheme_unavailable'
   | 'failed'
   | 'error';
 
@@ -15,8 +14,6 @@ export interface BuildCatalogOptions {
   results: SchemeSearchHit[];
   status: CatalogStatus;
   message?: string;
-  /** Live master_catalog registry, used to resolve the canonical scheme name by scheme_code. */
-  schemeList?: SchemeListItem[];
 }
 
 /**
@@ -31,15 +28,7 @@ export function buildSchemeQdrantOnSearch(options: BuildCatalogOptions) {
     results,
     status,
     message = '',
-    schemeList = [],
   } = options;
-
-  const schemeNameByCode = new Map<string, string>(
-    schemeList.map((item) => [
-      String(item.scheme_code || '').trim().toLowerCase(),
-      item.scheme_name,
-    ]),
-  );
 
   const items = results.map((hit, index) => {
     const section = hit.section || 'other';
@@ -47,12 +36,7 @@ export function buildSchemeQdrantOnSearch(options: BuildCatalogOptions) {
       section.charAt(0).toUpperCase() + section.slice(1);
     const score = Number(hit.score) || 0;
     const schemeCode = String(hit.scheme_code || '');
-    // Canonical name from master_catalog (keyed by scheme_code) takes
-    // priority over whatever's embedded in the Qdrant chunk's own payload,
-    // which can drift from the registry (stale ingest, alias, etc).
-    const schemeName =
-      schemeNameByCode.get(schemeCode.trim().toLowerCase()) ||
-      String(hit.scheme_name || '');
+    const schemeName = String(hit.scheme_name || '');
     const rawStateCode = String(hit.state_code || '').trim().toLowerCase();
     const stateCode =
       !rawStateCode || rawStateCode === 'default'
