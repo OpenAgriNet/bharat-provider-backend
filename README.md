@@ -28,6 +28,8 @@
 
 ## Installation
 
+Use **Node.js 26**, matching both Docker build and runtime stages.
+
 ```bash
 $ npm install
 ```

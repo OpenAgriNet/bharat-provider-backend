@@ -1,4 +1,4 @@
-FROM node:24-slim AS builder
+FROM node:26-slim AS builder
 
 WORKDIR /app
 
@@ -9,14 +9,14 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY . .
 RUN npm run build
 
-FROM node:24-slim AS runner
+FROM node:26-slim AS runner
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
 # ca-certificates is required for HTTPS from the container (curl + any
-# system trust store consumers). node:20-slim does not ship them by default;
+# system trust store consumers). Keep them explicit in the slim image;
 # without this, outbound TLS to api.agmarknet.gov.in fails (curl error 77 /
 # opaque 403 HTML from middleboxes).
 RUN apt-get update \
