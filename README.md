@@ -248,8 +248,12 @@ file permissions, and never commit key files. The provider unwraps `encrypted_ke
 with RSA-OAEP/SHA-256, then decrypts `encrypted_data` with AES-256-GCM and verifies
 `auth_tag` before parsing the returned array. Unsupported encryption, malformed
 payloads, missing/wrong keys and authentication failures return an error catalog;
-they do not return a success-shaped empty result. Audits retain encrypted response
-envelopes rather than decrypted farmer records.
+they do not return a success-shaped empty result.
+
+AgriStack Category A/B/C calls no longer write API audit details to PostgreSQL.
+The provider no longer creates or inserts into `agristack_api_audit`, and
+`AGRISTACK_AUDIT_TABLE` is no longer used. Existing audit tables and records are
+left untouched. Application logging and the chat API's Redis caching are unchanged.
 
 Run focused tests:
 `npm test -- --runInBand --runTestsByPath src/services/agristack/agristack.service.spec.ts`.

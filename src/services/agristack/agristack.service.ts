@@ -3,7 +3,6 @@ import { ConfigService } from "@nestjs/config";
 import axios from "axios";
 import { constants, createDecipheriv, createPrivateKey, privateDecrypt, randomUUID } from "crypto";
 import { readFileSync } from "fs";
-import { DatabaseService } from "../weatherforecast/database.service";
 
 interface AgristackTokenResponse {
   access_token: string;
@@ -23,38 +22,7 @@ export class AgristackService {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly databaseService: DatabaseService,
   ) { }
-
-  private async auditApiCall(params: {
-    logLabel: string;
-    attempt: number;
-    serviceId: string;
-    queryParam: Record<string, string>;
-    requestPayload: unknown;
-    success: boolean;
-    responsePayload?: unknown;
-    httpStatus?: number;
-    errorMessage?: string;
-  }): Promise<void> {
-    try {
-      await this.databaseService.insertAgristackApiAudit({
-        log_label: params.logLabel,
-        attempt: params.attempt,
-        service_id: params.serviceId,
-        farmer_id: params.queryParam.frCentralId ?? null,
-        season: params.queryParam.season ?? null,
-        year: params.queryParam.year ?? null,
-        success: params.success,
-        http_status: params.httpStatus ?? null,
-        error_message: params.errorMessage ?? null,
-        request_payload: params.requestPayload,
-        response_payload: params.responsePayload,
-      });
-    } catch (auditError: any) {
-      this.logger.warn(`[AGRISTACK] audit write failed: ${auditError?.message ?? String(auditError)}`);
-    }
-  }
 
   private getEnv(key: string, fallback = ""): string {
     return this.configService.get<string>(key) || process.env[key] || fallback;
@@ -258,34 +226,10 @@ export class AgristackService {
           },
         );
 
-        const entries = this.decryptSeekResponse(response.data);
-        await this.auditApiCall({
-          logLabel,
-          attempt,
-          serviceId,
-          queryParam,
-          requestPayload,
-          success: true,
-          httpStatus: response.status,
-          responsePayload: response.data,
-        });
-
-        return entries;
+        return this.decryptSeekResponse(response.data);
       } catch (error: any) {
         lastError = error;
         const status = error?.response?.status;
-
-        await this.auditApiCall({
-          logLabel,
-          attempt,
-          serviceId,
-          queryParam,
-          requestPayload,
-          success: false,
-          httpStatus: status,
-          responsePayload: error?.response?.data,
-          errorMessage: error?.message ?? "AgriStack call failed",
-        });
 
         if (status === 401 && attempt < maxAttempts) {
           this.logger.warn(`[AGRISTACK] ${logLabel} token rejected, refreshing and retrying`);
