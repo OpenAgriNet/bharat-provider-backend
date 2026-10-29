@@ -16,7 +16,7 @@ const POINT = {
     crop: 'Sorghum',
     institute: 'ICAR–DKMA',
     creator: 'jak',
-    document_kind: 'advisory',
+    type: 'advisory',
   },
 };
 
@@ -39,13 +39,13 @@ describe('QdrantClientService.queryAdvisoryPoints', () => {
     process.env = { ...saved };
   });
 
-  it('filters on document_kind=advisory and queries the provider collection by default', async () => {
+  it('filters on type=advisory and queries the provider collection by default', async () => {
     await service.queryAdvisoryPoints([0.1, 0.2], { limit: 40 });
     const [url, body, config] = mockedPost.mock.calls[0] as any[];
     expect(url).toBe('http://qdrant:6333/collections/document-data/points/query');
     expect(body).toEqual({
       query: [0.1, 0.2],
-      filter: { must: [{ key: 'document_kind', match: { value: 'advisory' } }] },
+      filter: { must: [{ key: 'type', match: { value: 'advisory' } }] },
       limit: 40,
       with_payload: true,
     });

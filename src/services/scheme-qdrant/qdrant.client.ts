@@ -136,7 +136,7 @@ export class QdrantClientService {
   }
 
   /**
-   * Dense vector search over advisory chunks only (document_kind=advisory).
+   * Dense vector search over advisory chunks only (type=advisory).
    * Unlike querySchemePoints there is no type=scheme or scheme_code filter.
    */
   async queryAdvisoryPoints(
@@ -163,7 +163,7 @@ export class QdrantClientService {
       url,
       {
         query: vector,
-        filter: { must: [{ key: 'document_kind', match: { value: 'advisory' } }] },
+        filter: { must: [{ key: 'type', match: { value: 'advisory' } }] },
         limit,
         with_payload: true,
       },

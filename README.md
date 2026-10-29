@@ -59,7 +59,7 @@ $ npm run test:cov
 ```
 ## Advisory search (`knowledge-advisory`)
 
-`POST /mobility/search` with category `knowledge-advisory` searches advisory chunks that docs-pipeline writes to Qdrant (`document_kind=advisory`).
+`POST /mobility/search` with category `knowledge-advisory` searches advisory chunks that docs-pipeline writes to Qdrant (`type=advisory`).
 
 | Variable | Default | Purpose |
 |---|---|---|

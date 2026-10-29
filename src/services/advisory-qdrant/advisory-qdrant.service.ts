@@ -9,7 +9,7 @@ const DEFAULT_TOP_K = 5;
 
 /**
  * Advisory document search over Qdrant (category `knowledge-advisory`).
- * Chunks are written by docs-pipeline with document_kind=advisory; this service embeds the
+ * Chunks are written by docs-pipeline with type=advisory; this service embeds the
  * question, searches those chunks, keeps the best chunk per advisory entry and returns a
  * Beckn on_search catalog. Selected by ADVISORY_BACKEND=qdrant in the controller.
  */
