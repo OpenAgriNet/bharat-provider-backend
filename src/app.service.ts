@@ -26,6 +26,11 @@ import {
   getUniqueKey,
   decryptRequest,
 } from "./utils/encryption";
+import {
+  classifyRequestError,
+  ExternalApiOutcome,
+  trackExternalApiCall,
+} from "./telemetry";
 import { LoggerService } from "./services/logger/logger.service";
 import { format } from "date-fns";
 
@@ -790,6 +795,25 @@ export class AppService {
     transactionId?: string,
   ): Promise<any> {
     const logCtx = `[sendOTP][txn:${transactionId ?? "unknown"}]`;
+    const otpUrl = `${process.env.PM_KISAN_BASE_OTP_URL}/ChatbotOTP`;
+    let startedAt = Date.now();
+    let identifierType: string | null = null;
+    const track = (
+      outcome: ExternalApiOutcome,
+      statusCode: number | null,
+      errorType?: string,
+      upstreamMessage?: string,
+    ) =>
+      trackExternalApiCall({
+        apiService: "pmkisan_send_otp",
+        url: otpUrl,
+        startedAt,
+        outcome,
+        statusCode,
+        errorType,
+        upstreamMessage,
+        identifierType,
+      });
 
     try {
       // Auto-detect the type if not provided
@@ -802,6 +826,7 @@ export class AppService {
         detectedType = "Ben_id";
       }
 
+      identifierType = detectedType;
       this.logger.log(
         `PMKISAN detectedType=${detectedType} mobileNumber=${mobileNumber}`,
         logCtx,
@@ -828,14 +853,17 @@ export class AppService {
       let config = {
         method: "post",
         maxBodyLength: Infinity,
-        url: `${process.env.PM_KISAN_BASE_OTP_URL}/ChatbotOTP`,
+        url: otpUrl,
+        skipTelemetry: true,
         headers: {
           "Content-Type": "application/json",
         },
         data: data,
         timeout: 60000,
       };
+      startedAt = Date.now();
       let response: any = await axios.request(config);
+      const httpStatus: number = response.status;
       this.logger.log(
         `PMKISAN sendOTP response status=${response.status}`,
         logCtx,
@@ -850,6 +878,7 @@ export class AppService {
 
         if (!encryptedResponse) {
           this.logger.error("PMKISAN no encrypted response received", logCtx);
+          track("error", httpStatus, "invalid_response");
           return {
             d: {
               output: {
@@ -878,6 +907,12 @@ export class AppService {
             `PMKISAN sendOTP result status=${response["status"]}`,
             logCtx,
           );
+          track(
+            response["status"] === "OK" ? "success" : "rejected",
+            httpStatus,
+            undefined,
+            parsedData?.Message,
+          );
         } catch (e) {
           this.logger.error(
             "PMKISAN error parsing decrypted sendOTP response",
@@ -885,6 +920,7 @@ export class AppService {
             logCtx,
           );
           response["status"] = "NOT_OK";
+          track("error", httpStatus, "parse_error");
         }
 
         return response;
@@ -893,6 +929,7 @@ export class AppService {
           `PMKISAN sendOTP non-success HTTP status=${response.status}`,
           logCtx,
         );
+        track("error", httpStatus, "http_error");
         return {
           d: {
             output: {
@@ -904,6 +941,8 @@ export class AppService {
       }
     } catch (error) {
       this.logger.error("PMKISAN sendOTP failed", error, logCtx);
+      const { statusCode, errorType } = classifyRequestError(error);
+      track("error", statusCode, errorType, error?.message);
 
       /*
       // Check for network-related errors
@@ -944,6 +983,25 @@ export class AppService {
     transactionId?: string,
   ): Promise<any> {
     const logCtx = `[verifyOTP][txn:${transactionId ?? "unknown"}]`;
+    const verifyUrl = `${process.env.PM_KISAN_BASE_OTP_URL}/ChatbotOTPVerified`;
+    let startedAt = Date.now();
+    let identifierType: string | null = null;
+    const track = (
+      outcome: ExternalApiOutcome,
+      statusCode: number | null,
+      errorType?: string,
+      upstreamMessage?: string,
+    ) =>
+      trackExternalApiCall({
+        apiService: "pmkisan_verify_otp",
+        url: verifyUrl,
+        startedAt,
+        outcome,
+        statusCode,
+        errorType,
+        upstreamMessage,
+        identifierType,
+      });
 
     try {
       // Auto-detect the type if not provided
@@ -956,6 +1014,7 @@ export class AppService {
         detectedType = "Ben_id";
       }
 
+      identifierType = detectedType;
       this.logger.log(
         `Detected type for verification | mobileNumber=${mobileNumber} detectedType=${detectedType}`,
         logCtx,
@@ -980,14 +1039,17 @@ export class AppService {
       let config = {
         method: "post",
         maxBodyLength: Infinity,
-        url: `${process.env.PM_KISAN_BASE_OTP_URL}/ChatbotOTPVerified`,
+        url: verifyUrl,
+        skipTelemetry: true,
         headers: {
           "Content-Type": "application/json",
         },
         data: data,
       };
 
+      startedAt = Date.now();
       let response: any = await axios.request(config);
+      const httpStatus: number = response.status;
       // this.logger.log("verifyOTP", response.status);
       if (response.status >= 200 && response.status < 300) {
         response = await response.data;
@@ -1006,6 +1068,12 @@ export class AppService {
             `OTP verification result | status=${response["status"]}`,
             logCtx,
           );
+          track(
+            response["status"] === "OK" ? "success" : "rejected",
+            httpStatus,
+            undefined,
+            parsedDecryptedData?.Message,
+          );
         } catch (e) {
           this.logger.error(
             `Error parsing decrypted verifyOTP response: ${e.message}`,
@@ -1013,6 +1081,7 @@ export class AppService {
             logCtx,
           );
           response["status"] = "NOT_OK";
+          track("error", httpStatus, "parse_error");
         }
 
         return response;
@@ -1021,6 +1090,7 @@ export class AppService {
           `ChatbotOTPVerified returned non-success HTTP status | status=${response.status}`,
           logCtx,
         );
+        track("error", httpStatus, "http_error");
         return {
           d: {
             output: {
@@ -1036,6 +1106,8 @@ export class AppService {
         error.stack,
         logCtx,
       );
+      const { statusCode, errorType } = classifyRequestError(error);
+      track("error", statusCode, errorType, error?.message);
       return {
         d: {
           output: {
@@ -3077,6 +3149,24 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
     type: string = "Ben_id",
   ): Promise<any> {
     let res: any;
+    const userDetailsUrl = `${process.env.PM_KISAN_BASE_URL}/ChatbotUserDetails`;
+    let startedAt = Date.now();
+    const track = (
+      outcome: ExternalApiOutcome,
+      statusCode: number | null,
+      errorType?: string,
+      upstreamMessage?: string,
+    ) =>
+      trackExternalApiCall({
+        apiService: "pmkisan_user_details",
+        url: userDetailsUrl,
+        startedAt,
+        outcome,
+        statusCode,
+        errorType,
+        upstreamMessage,
+        identifierType: type,
+      });
     try {
       const requestData = `{\"Types\":\"${type}\",\"Values\":\"${mobileNumber}\",\"Token\":\"${process.env.PM_KISSAN_TOKEN}\"}`;
       this.logger.log("Request data: ", requestData);
@@ -3091,7 +3181,8 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       let config = {
         method: "post",
         maxBodyLength: Infinity,
-        url: `${process.env.PM_KISAN_BASE_URL}/ChatbotUserDetails`,
+        url: userDetailsUrl,
+        skipTelemetry: true,
         headers: {
           "Content-Type": "application/json",
         },
@@ -3100,7 +3191,9 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       };
 
       this.logger.log("getUserData config:", config);
+      startedAt = Date.now();
       res = await axios.request(config);
+      const httpStatus: number = res.status;
       this.logger.log(`getUserData response status=${res.status}`);
 
       if (res.status >= 200 && res.status < 300) {
@@ -3116,8 +3209,15 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
             res.d.output = JSON.parse(decryptedData);
 
             res["status"] = res.d.output.Rsponce != "False" ? "OK" : "NOT_OK";
+            track(
+              res["status"] === "OK" ? "success" : "rejected",
+              httpStatus,
+              undefined,
+              res.d.output.Message,
+            );
           } catch (parseError) {
             this.logger.error("Error parsing decrypted data:", parseError);
+            track("error", httpStatus, "parse_error");
             res.d.output = {
               Rsponce: "False",
               Message: "Error parsing response",
@@ -3126,6 +3226,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
           }
         } else {
           this.logger.error("Invalid response structure:", res);
+          track("error", httpStatus, "invalid_response");
           res = {
             d: {
               output: {
@@ -3138,6 +3239,7 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
         }
       } else {
         this.logger.error("getUserData HTTP error:", res.status);
+        track("error", httpStatus, "http_error");
         res = {
           d: {
             output: {
@@ -3150,6 +3252,8 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       }
     } catch (error) {
       this.logger.error("getUserData error:", error.message);
+      const { statusCode, errorType } = classifyRequestError(error);
+      track("error", statusCode, errorType, error?.message);
       res = {
         d: {
           output: {
@@ -3207,6 +3311,29 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       `ChatbotBeneficiaryStatus | userIdentifier=${userIdentifier} type=${type}`,
     );
     let userErrors = [];
+    const beneficiaryStatusUrl = `${process.env.PM_KISAN_BASE_URL}/ChatbotBeneficiaryStatus`;
+    let startedAt = Date.now();
+    // Later processing can throw into the same catch; record the call only once.
+    let tracked = false;
+    const track = (
+      outcome: ExternalApiOutcome,
+      statusCode: number | null,
+      errorType?: string,
+      upstreamMessage?: string,
+    ) => {
+      if (tracked) return;
+      tracked = true;
+      trackExternalApiCall({
+        apiService: "pmkisan_beneficiary_status",
+        url: beneficiaryStatusUrl,
+        startedAt,
+        outcome,
+        statusCode,
+        errorType,
+        upstreamMessage,
+        identifierType: type,
+      });
+    };
 
     try {
       var token = getUniqueKey();
@@ -3220,7 +3347,8 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       let config = {
         method: "post",
         maxBodyLength: Infinity,
-        url: `${process.env.PM_KISAN_BASE_URL}/ChatbotBeneficiaryStatus`,
+        url: beneficiaryStatusUrl,
+        skipTelemetry: true,
         headers: {
           "Content-Type": "application/json",
         },
@@ -3228,7 +3356,9 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       };
 
       this.logger.log(`In fetchUserData config=${JSON.stringify(config)}`);
+      startedAt = Date.now();
       let errors: any = await axios.request(config);
+      const httpStatus: number = errors.status;
       errors = await errors.data;
       this.logger.log(`related issues=${JSON.stringify(errors)}`);
 
@@ -3238,8 +3368,15 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       try {
         errors = JSON.parse(decryptedData);
         this.logger.log(`Decrypted API response=${JSON.stringify(errors)}`);
+        track(
+          errors.Rsponce == "True" ? "success" : "rejected",
+          httpStatus,
+          undefined,
+          errors.Message,
+        );
       } catch (parseError) {
         this.logger.error("Error parsing decrypted data", parseError);
+        track("error", httpStatus, "parse_error");
         // Fallback to original response if parsing fails
         errors = {
           Rsponce: "False",
@@ -3298,6 +3435,8 @@ eKYC - ${eKYC_Status == "Y" ? "Done" : "Not Done"}`;
       }
     } catch (error) {
       this.logger.error("ChatbotBeneficiaryStatus error", error);
+      const { statusCode, errorType } = classifyRequestError(error);
+      track("error", statusCode, errorType, error?.message);
     }
 
     return `=== PM KISAN BENEFICIARY STATUS ===\n\n${userDetails}\n\n=== PAYMENT STATUS & ISSUES ===\n\n${userErrors.join(
