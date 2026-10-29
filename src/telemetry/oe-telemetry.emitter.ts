@@ -12,6 +12,7 @@ import {
   type TelemetryContext,
 } from './telemetry.context';
 import { queueTelemetryEvent } from './telemetry.flow-buffer';
+import { getTelemetryHeaders } from './telemetry-auth';
 
 export type OeFlowEid = 'OE_START' | 'OE_ITEM_RESPONSE' | 'OE_END';
 export type OeItemType = 'bpp_network_api_call' | 'ext_api_call';
@@ -217,12 +218,7 @@ async function dispatchOeBatch(events: Record<string, unknown>[]): Promise<void>
   const batchEvents = events.slice();
   if (!isTelemetryReady() || batchEvents.length === 0) return;
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const authKey =
-    process.env.TELEMETRY_AUTH_KEY || process.env.TELEMETRY_SERVICE_AUTH_KEY;
-  if (authKey) {
-    headers.Authorization = `Bearer ${authKey}`;
-  }
+  const headers = getTelemetryHeaders();
 
   const now = Date.now();
   const batchMid = generateTelemetryMid();
