@@ -1,4 +1,14 @@
-import { AdvisoryHit, dedupeByPop, formatSource } from './advisory-qdrant.util';
+import {
+  AdvisoryHit,
+  DAYS_BOOST,
+  SEASON_BOOST,
+  dedupeByPop,
+  formatSource,
+  normalizeCrop,
+  parseAdvisoryParams,
+  rankHits,
+  resolvePreferredSeason,
+} from './advisory-qdrant.util';
 
 function hit(overrides: Partial<AdvisoryHit>): AdvisoryHit {
   return {
@@ -12,6 +22,9 @@ function hit(overrides: Partial<AdvisoryHit>): AdvisoryHit {
     crop: 'Sorghum',
     institute: 'ICAR–DKMA',
     creator: 'jak',
+    season: 'Rabi',
+    start_period: 105,
+    end_period: 120,
     ...overrides,
   };
 }
@@ -70,5 +83,155 @@ describe('formatSource', () => {
   });
   it('credits the creator alone when there is no institute', () => {
     expect(formatSource('', 'jak')).toBe('jak');
+  });
+});
+
+function intent(tags: Array<[string, string]>, name: string | null = 'aphids') {
+  return {
+    message: {
+      intent: {
+        item: {
+          descriptor: name === null ? {} : { name },
+          tags: [
+            {
+              descriptor: { code: 'search_params' },
+              list: tags.map(([code, value]) => ({ descriptor: { code }, value })),
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
+describe('normalizeCrop', () => {
+  it('maps case variants and aliases to the stored crop name', () => {
+    expect(normalizeCrop('wheat')).toBe('Wheat');
+    expect(normalizeCrop('  RICE ')).toBe('Rice');
+    expect(normalizeCrop('paddy')).toBe('Rice');
+    expect(normalizeCrop('jowar')).toBe('Sorghum');
+    expect(normalizeCrop('kodo millet')).toBe('Kodo Millet');
+  });
+
+  it('maps Hindi crop names', () => {
+    expect(normalizeCrop('गेहूं')).toBe('Wheat');
+    expect(normalizeCrop('धान')).toBe('Rice');
+    expect(normalizeCrop('ज्वार')).toBe('Sorghum');
+  });
+
+  it('title-cases unknown crops and returns empty for blank input', () => {
+    expect(normalizeCrop('pearl MILLET')).toBe('Pearl Millet');
+    expect(normalizeCrop('')).toBe('');
+    expect(normalizeCrop(undefined)).toBe('');
+  });
+});
+
+describe('parseAdvisoryParams', () => {
+  it('reads crop, district, season, days and top_k from the search_params tags', () => {
+    const p = parseAdvisoryParams(
+      intent([
+        ['crop', 'wheat'],
+        ['district', ' Lucknow '],
+        ['season', 'Kharif'],
+        ['days_after_sowing', '45'],
+        ['top_k', '3'],
+      ]),
+    );
+    expect(p).toEqual({
+      query: 'aphids',
+      crop: 'Wheat',
+      district: 'Lucknow',
+      season: 'Kharif',
+      daysAfterSowing: 45,
+      topK: 3,
+    });
+  });
+
+  it('works with only the query (existing callers)', () => {
+    const p = parseAdvisoryParams({ message: { intent: { item: { descriptor: { name: 'aphids in wheat' } } } } });
+    expect(p).toEqual({ query: 'aphids in wheat', crop: '', district: '', season: '', daysAfterSowing: null, topK: null });
+  });
+
+  it('ignores non-numeric days and empty values', () => {
+    const p = parseAdvisoryParams(
+      intent([
+        ['days_after_sowing', 'about 40'],
+        ['district', '  '],
+      ]),
+    );
+    expect(p.daysAfterSowing).toBeNull();
+    expect(p.district).toBe('');
+  });
+
+  it('accepts a negative day count and the search-params group spelling', () => {
+    const body = intent([['days_after_sowing', '-10']]);
+    body.message.intent.item.tags[0].descriptor.code = 'search-params';
+    expect(parseAdvisoryParams(body).daysAfterSowing).toBe(-10);
+  });
+
+  it('keeps the descriptor name as the query over a query tag', () => {
+    expect(parseAdvisoryParams(intent([['query', 'other']], 'from descriptor')).query).toBe('from descriptor');
+    expect(parseAdvisoryParams(intent([['query', 'from tag']], null)).query).toBe('from tag');
+  });
+});
+
+describe('resolvePreferredSeason', () => {
+  it('uses the env setting when set, even if the request sends a season', () => {
+    expect(resolvePreferredSeason('Kharif', 'Rabi')).toBe('Rabi');
+  });
+
+  it('falls back to the request season when the env setting is empty', () => {
+    expect(resolvePreferredSeason('Kharif', '')).toBe('Kharif');
+    expect(resolvePreferredSeason('Kharif', undefined)).toBe('Kharif');
+  });
+
+  it('is empty (no preference) when neither is set', () => {
+    expect(resolvePreferredSeason('', '  ')).toBe('');
+  });
+});
+
+describe('rankHits', () => {
+  const kharif = hit({ chunk_id: 'k', season: 'Kharif', score: 0.8, pop_id: 1, start_period: 10, end_period: 30 });
+  const rabi = hit({ chunk_id: 'r', season: 'Rabi', score: 0.75, pop_id: 2, start_period: 105, end_period: 120 });
+
+  it('ranks the preferred season first but keeps the other seasons', () => {
+    const out = rankHits([kharif, rabi], { preferredSeason: 'rabi', daysAfterSowing: null });
+    expect(out.map((h) => h.chunk_id)).toEqual(['r', 'k']);
+  });
+
+  it('keeps score order when there is no preference', () => {
+    const out = rankHits([rabi, kharif], { preferredSeason: '', daysAfterSowing: null });
+    expect(out.map((h) => h.chunk_id)).toEqual(['k', 'r']);
+  });
+
+  it('ranks an advisory whose day range contains the day count first', () => {
+    const out = rankHits([rabi, kharif], { preferredSeason: '', daysAfterSowing: 20 });
+    expect(out.map((h) => h.chunk_id)).toEqual(['k', 'r']);
+    const out2 = rankHits([kharif, rabi], { preferredSeason: '', daysAfterSowing: 110 });
+    expect(out2.map((h) => h.chunk_id)).toEqual(['r', 'k']);
+  });
+
+  it('treats range ends as inclusive and ignores hits without a range', () => {
+    const noRange = hit({ chunk_id: 'n', score: 0.8, pop_id: 3, start_period: null, end_period: null });
+    expect(rankHits([noRange, rabi], { preferredSeason: '', daysAfterSowing: 120 }).map((h) => h.chunk_id)).toEqual([
+      'r',
+      'n',
+    ]);
+    expect(rankHits([noRange, rabi], { preferredSeason: '', daysAfterSowing: 121 }).map((h) => h.chunk_id)).toEqual([
+      'n',
+      'r',
+    ]);
+  });
+
+  it('never drops a hit and does not mutate the input', () => {
+    const input = [kharif, rabi];
+    const out = rankHits(input, { preferredSeason: 'Zaid', daysAfterSowing: 500 });
+    expect(out).toHaveLength(2);
+    expect(input.map((h) => h.chunk_id)).toEqual(['k', 'r']);
+  });
+
+  it('exposes boosts large enough to matter between close scores', () => {
+    expect(SEASON_BOOST).toBeGreaterThan(0.05);
+    expect(DAYS_BOOST).toBeGreaterThan(SEASON_BOOST);
   });
 });

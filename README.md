@@ -68,6 +68,19 @@ $ npm run test:cov
 | `ADVISORY_BACKEND` | `qdrant` | Advisory is served from Qdrant. Set `marqo` to fall back to the legacy Marqo path. |
 | `ADVISORY_QDRANT_COLLECTION_NAME` | `QDRANT_COLLECTION_NAME` | Collection holding advisory chunks (sandbox: `document-data`; production: the PROD collection). |
 | `ADVISORY_QDRANT_TOP_K` | `5` | Maximum advisory entries returned (best chunk per advisory entry). |
+| `ADVISORY_DEFAULT_SEASON` | _(empty)_ | Preferred season (for example `Rabi`), a soft ranking preference only: matching advisories rank first, others are still returned. When empty, the `season` search tag is used if sent; otherwise there is no season preference. |
+
+Optional request parameters go in `message.intent.item.tags`, in a tag group with code `search_params` (the query stays in `item.descriptor.name`):
+
+| Tag code | Effect |
+|---|---|
+| `crop` | Exact-match filter on the stored crop name (case and Hindi aliases are normalized, for example `wheat` or `गेहूं` becomes `Wheat`). |
+| `district` | Location filter. The source data has no location field yet, so the district query returns nothing and the crop-level results are used (`location-status: location_not_applied`). Both queries run in parallel on one embedding. |
+| `days_after_sowing` | Integer. Advisories whose `start_period`..`end_period` range contains it rank first (soft preference). |
+| `season` | Used as the preferred season only when `ADVISORY_DEFAULT_SEASON` is empty (soft preference). |
+| `top_k` | Maximum entries returned, 1 to 20. |
+
+The `search-context` tags in the reply add `location-status` (`not_requested`, `location_matched`, `location_not_applied`, `no_match`), `has-day-range` and `days-matched`.
 
 Uses the same `QDRANT_URL`, `QDRANT_API_KEY` and embedding setup (`HF_HOME`) as scheme search. The reply is `on_search` with `chunk-details` tags `title, crop, section, score, doc_id, chunk_id, source, text`; `text` ends with a `Source: <institute>, <creator>` line.
 

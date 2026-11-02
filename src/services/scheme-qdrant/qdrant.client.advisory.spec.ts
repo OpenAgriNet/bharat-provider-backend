@@ -17,6 +17,9 @@ const POINT = {
     institute: 'ICAR–DKMA',
     creator: 'jak',
     document_kind: 'advisory',
+    season: 'Rabi',
+    start_period: '105',
+    end_period: '120',
   },
 };
 
@@ -72,6 +75,9 @@ describe('QdrantClientService.queryAdvisoryPoints', () => {
         crop: 'Sorghum',
         institute: 'ICAR–DKMA',
         creator: 'jak',
+        season: 'Rabi',
+        start_period: 105,
+        end_period: 120,
       },
     ]);
   });
@@ -90,6 +96,35 @@ describe('QdrantClientService.queryAdvisoryPoints', () => {
     expect(hit.pop_id).toBeUndefined();
     expect(hit.institute).toBe('');
     expect(hit.creator).toBe('');
+    expect(hit.season).toBe('');
+    expect(hit.start_period).toBeNull();
+    expect(hit.end_period).toBeNull();
+  });
+
+  it('adds crop and district as exact-match filters when given', async () => {
+    await service.queryAdvisoryPoints([0.1], { crop: 'Wheat', district: 'Lucknow' });
+    const body = (mockedPost.mock.calls[0] as any[])[1];
+    expect(body.filter.must).toEqual([
+      { key: 'document_kind', match: { value: 'advisory' } },
+      { key: 'crop', match: { value: 'Wheat' } },
+      { key: 'district', match: { value: 'Lucknow' } },
+    ]);
+  });
+
+  it('never filters on season or days after sowing', async () => {
+    await service.queryAdvisoryPoints([0.1], { crop: 'Wheat' });
+    const keys = (mockedPost.mock.calls[0] as any[])[1].filter.must.map((c: any) => c.key);
+    expect(keys).toEqual(['document_kind', 'crop']);
+  });
+
+  it('reads negative and non-numeric day ranges safely', async () => {
+    mockedPost.mockResolvedValue({
+      status: 200,
+      data: { result: { points: [{ score: 0.5, payload: { text: 't', start_period: '-30', end_period: 'abc' } }] } },
+    } as any);
+    const [hit] = await service.queryAdvisoryPoints([0.1]);
+    expect(hit.start_period).toBe(-30);
+    expect(hit.end_period).toBeNull();
   });
 
   it('throws when Qdrant is not configured', async () => {
