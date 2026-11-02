@@ -534,28 +534,30 @@ export class KhcService {
     }
   }
 
-  private validateGrievanceNumber(grievanceNo: string): void {
+  private grievanceNumber(value: unknown): string {
+    const number = typeof value === "string" ? value.trim() : "";
     if (
-      typeof grievanceNo !== "string" ||
-      !/^[A-Za-z0-9][A-Za-z0-9/-]{0,99}$/.test(grievanceNo)
+      number.length > 100 ||
+      !/^[A-Za-z]{2}\/[0-9]{6}\/0*[1-9][0-9]*$/.test(number)
     ) {
       throw new KhcError(
-        "Please provide a valid KHC grievance number.",
+        "Please provide the full KHC grievance number from your SMS: two letters/six digits/positive sequence, for example BR/240926/1 (example only).",
         "invalid_request"
       );
     }
+    return number.toUpperCase();
   }
 
-  async sendStatusOtp(grievanceNo: string): Promise<void> {
-    this.validateGrievanceNumber(grievanceNo);
+  async sendStatusOtp(value: unknown): Promise<void> {
+    const grievanceNo = this.grievanceNumber(value);
     const key = `status:${grievanceNo}`;
     this.checkOtpSendLimits(key);
     await this.request("POST", "/v1/state/grievances/check-status", undefined, { grievanceNo });
     this.otpSends.set(key, [...(this.otpSends.get(key) ?? []), Date.now()]);
   }
 
-  async getStatus(grievanceNo: string, otp: unknown): Promise<Values> {
-    this.validateGrievanceNumber(grievanceNo);
+  async getStatus(value: unknown, otp: unknown): Promise<Values> {
+    const grievanceNo = this.grievanceNumber(value);
     if (typeof otp !== "string" || !/^[0-9]{6}$/.test(otp)) {
       throw new KhcError("A valid 6-digit OTP is required.", "invalid_request");
     }
@@ -743,9 +745,8 @@ export class KhcService {
         }
         result = await this.createGrievance(values, transactionId);
       } else {
-        const grievanceNo = text(values, "grievanceNo", 100);
         if (values.request_type === "get_status_otp") {
-          await this.sendStatusOtp(grievanceNo);
+          await this.sendStatusOtp(values.grievanceNo);
           return buildResponse(body, action, {
             code: "status_otp_sent",
             name: "Kisan Help Center",
@@ -755,7 +756,7 @@ export class KhcService {
         if (values.request_type !== "verify_status_otp") {
           throw new KhcError("Invalid KHC status request_type.", "invalid_request");
         }
-        result = await this.getStatus(grievanceNo, values.otp);
+        result = await this.getStatus(values.grievanceNo, values.otp);
       }
       const fields = [
         "grievanceNo",

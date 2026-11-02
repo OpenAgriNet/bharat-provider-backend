@@ -215,6 +215,14 @@ the API prefix; do not add another `/api`. Both calls use ApiKey authorization.
 The send response has `status` and `message`, without `data`. Only verification
 returns grievance details. The old direct GET status endpoint is no longer used.
 
+Both status operations validate `grievanceNo` before calling KHC: two ASCII letters,
+six ASCII digits and a positive digit-only sequence separated by slashes, for
+example `BR/240926/1`, with at most 100 characters after trimming. The prefix is
+uppercased and leading zeros are preserved, including in the resend-limit key.
+Zero-only sequences, malformed values and non-string tags return `invalid_request`
+without sending SMS. The OAN agent converts regional digits before forwarding.
+Only the format is checked locally, not calendar validity or grievance existence.
+
 KHC sends the OTP to the mobile registered on the grievance and enforces its
 five-minute lifetime, single use and invalidation on resend. No registration
 session/token is created or reused for status. Incorrect OTPs can be corrected

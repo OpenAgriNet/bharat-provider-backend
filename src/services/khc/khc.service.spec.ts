@@ -218,11 +218,66 @@ describe("KhcService", () => {
     expect(http.request).not.toHaveBeenCalled();
   });
 
-  it.each(["", "abc\r\nInjected: yes", "a".repeat(101)])(
+  it.each([
+    "", "abc\r\nInjected: yes", "a".repeat(101), "123456", "9876543210", "BR2409261", "BR-240926-1",
+    "B/240926/1", "BHR/240926/1", "12/240926/1", "BR/24092/1", "BR/2409260/1",
+    "BR/24A926/1", "BR/240926/0", "BR/240926/000", "BR/240926/-1", "BR/240926/+1",
+    "BR/240926/1.5", "BR/240926/", "BR/240926/1/2", "BR /240926/1", "BR/240926/1\n2",
+    "BR/240926/" + "1".repeat(91), "\u00df/240926/1", "\u0131R/240926/1",
+  ])(
     "rejects invalid grievance number %j",
     async (number) => {
-      await expect(service.getStatus(number, "012345")).rejects.toThrow();
-      await expect(service.sendStatusOtp(number)).rejects.toThrow();
+      await expect(service.getStatus(number, "012345")).rejects.toThrow("BR/240926/1");
+      await expect(service.sendStatusOtp(number)).rejects.toThrow("BR/240926/1");
+      for (const request_type of ["get_status_otp", "verify_status_otp"]) {
+        const result = await service.handle(
+          body({ request_type, grievanceNo: number, otp: "012345" }), "on_status"
+        );
+        expect(result.message.order.tags[0].descriptor.code).toBe("invalid_request");
+        expect(result.message.order.tags[0].descriptor.short_desc).toContain("BR/240926/1");
+      }
+      expect(http.request).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    [" br/240926/0002 ", "BR/240926/0002"],
+    ["UP/000000/1", "UP/000000/1"],
+    ["BR/999999/1", "BR/999999/1"],
+    ["BR/240926/" + "0".repeat(89) + "1", "BR/240926/" + "0".repeat(89) + "1"],
+  ])("normalizes valid grievance number %s without date validation", async (input, grievanceNo) => {
+    http.request.mockResolvedValueOnce({ data: { status: "200 OK", message: "OTP sent successfully" } });
+    const sent = await service.handle(body({ request_type: "get_status_otp", grievanceNo: input }), "on_status");
+    expect(sent.message.order.tags[0].descriptor.code).toBe("status_otp_sent");
+    expect(http.request.mock.calls[0][0].params).toEqual({ grievanceNo });
+    http.request.mockResolvedValueOnce({ data: { ...success, data: { ...success.data, grievanceNo } } });
+    const verified = await service.handle(
+      body({ request_type: "verify_status_otp", grievanceNo: input, otp: "012345" }), "on_status"
+    );
+    expect(verified.message.order.tags[0].descriptor.code).toBe("grievance_status");
+    expect(http.request.mock.calls[1][0].data).toEqual({ grievanceNo, otp: "012345" });
+  });
+
+  it("uses the normalized grievance number for resend limits", async () => {
+    http.request.mockResolvedValueOnce({ data: { status: "200 OK", message: "OTP sent successfully" } });
+    await service.sendStatusOtp(" br/240926/2 ");
+    await expect(service.sendStatusOtp("BR/240926/2")).rejects.toThrow("wait");
+    expect(http.request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([[undefined], [null], [123456], [["BR/240926/2"]], [{ grievanceNo: "BR/240926/2" }]])(
+    "rejects non-string grievance tags %j without HTTP",
+    async (value) => {
+      for (const request_type of ["get_status_otp", "verify_status_otp"]) {
+        const result = await service.handle({
+          message: { order: { fulfillments: [{ customer: { person: { tags: [
+            { descriptor: { code: "request_type" }, value: request_type },
+            { descriptor: { code: "grievanceNo" }, value },
+          ] } } }] } },
+        }, "on_status");
+        expect(result.message.order.tags[0].descriptor.code).toBe("invalid_request");
+        expect(result.message.order.tags[0].descriptor.short_desc).toContain("BR/240926/1");
+      }
       expect(http.request).not.toHaveBeenCalled();
     }
   );
