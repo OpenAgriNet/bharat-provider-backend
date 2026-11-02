@@ -2,12 +2,27 @@ import { AdvisoryHit, formatSource } from './advisory-qdrant.util';
 
 export type AdvisoryStatus = 'success' | 'not_found' | 'failed' | 'error';
 
+/**
+ * How the farmer's district was handled:
+ * - `not_requested`: no district was sent
+ * - `location_matched`: advisories matched the district
+ * - `location_not_applied`: a district was sent but no advisory carries location data, so the
+ *   crop-level results were returned instead
+ * - `no_match`: a district was sent and nothing matched at all
+ */
+export type LocationStatus = 'not_requested' | 'location_matched' | 'location_not_applied' | 'no_match';
+
 export interface BuildAdvisoryCatalogOptions {
   context: any;
   query: string;
   results: AdvisoryHit[];
   status: AdvisoryStatus;
   message?: string;
+  locationStatus?: LocationStatus;
+  /** True when at least one returned advisory has a days-after-sowing range. */
+  hasDayRange?: boolean;
+  /** True when a days-after-sowing value was sent and a returned advisory's range contains it. */
+  daysMatched?: boolean;
 }
 
 const CATEGORY_CODE = 'knowledge-advisory';
@@ -22,7 +37,16 @@ function tag(code: string, name: string, value: string) {
  * source, text. `text` is the stored chunk text followed by a "Source:" line.
  */
 export function buildAdvisoryOnSearch(options: BuildAdvisoryCatalogOptions) {
-  const { context, query, results, status, message = '' } = options;
+  const {
+    context,
+    query,
+    results,
+    status,
+    message = '',
+    locationStatus = 'not_requested',
+    hasDayRange = false,
+    daysMatched = false,
+  } = options;
 
   const items = results.map((hit, index) => {
     const source = formatSource(hit.institute, hit.creator);
@@ -84,6 +108,9 @@ export function buildAdvisoryOnSearch(options: BuildAdvisoryCatalogOptions) {
               { descriptor: { code: 'status', name: 'Status' }, value: status },
               { descriptor: { code: 'message', name: 'Message' }, value: message },
               { descriptor: { code: 'hit-count', name: 'Hit Count' }, value: String(items.length) },
+              { descriptor: { code: 'location-status', name: 'Location Status' }, value: locationStatus },
+              { descriptor: { code: 'has-day-range', name: 'Has Day Range' }, value: String(hasDayRange) },
+              { descriptor: { code: 'days-matched', name: 'Days Matched' }, value: String(daysMatched) },
               { descriptor: { code: 'search-backend', name: 'Search Backend' }, value: 'qdrant' },
             ],
           },

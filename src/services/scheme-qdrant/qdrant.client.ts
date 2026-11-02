@@ -138,10 +138,12 @@ export class QdrantClientService {
   /**
    * Dense vector search over advisory chunks only (document_kind=advisory).
    * Unlike querySchemePoints there is no type=scheme or scheme_code filter.
+   * Optional `crop` (stored form, for example "Wheat") and `district` add exact-match filters.
+   * Season and days after sowing are not filters; they are applied as a soft ranking afterwards.
    */
   async queryAdvisoryPoints(
     vector: number[],
-    options: { limit?: number; collectionName?: string } = {},
+    options: { limit?: number; collectionName?: string; crop?: string; district?: string } = {},
   ): Promise<AdvisoryHit[]> {
     const baseUrl = this.getUrl();
     if (!baseUrl) {
@@ -158,12 +160,23 @@ export class QdrantClientService {
       headers['api-key'] = apiKey;
     }
 
+    const must: Array<{ key: string; match: { value: string } }> = [
+      { key: 'document_kind', match: { value: 'advisory' } },
+    ];
+    if (options.crop) {
+      must.push({ key: 'crop', match: { value: options.crop } });
+    }
+    if (options.district) {
+      // No location field exists in the source data yet, so this matches nothing until it does.
+      must.push({ key: 'district', match: { value: options.district } });
+    }
+
     const started = Date.now();
     const response = await axios.post(
       url,
       {
         query: vector,
-        filter: { must: [{ key: 'document_kind', match: { value: 'advisory' } }] },
+        filter: { must },
         limit,
         with_payload: true,
       },
@@ -208,7 +221,16 @@ export class QdrantClientService {
       crop: String(payload.crop ?? ''),
       institute: String(payload.institute ?? ''),
       creator: String(payload.creator ?? ''),
+      season: String(payload.season ?? ''),
+      start_period: this.periodFrom(payload.start_period),
+      end_period: this.periodFrom(payload.end_period),
     };
+  }
+
+  /** docs-pipeline stores day ranges as text ("20", "-30"); null when absent or not an integer. */
+  private periodFrom(value: unknown): number | null {
+    const text = String(value ?? '').trim();
+    return /^-?\d+$/.test(text) ? parseInt(text, 10) : null;
   }
 
   private hitToResult(hit: any): SchemeSearchHit {

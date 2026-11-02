@@ -12,6 +12,9 @@ const HIT: AdvisoryHit = {
   crop: 'Sorghum',
   institute: 'ICAR–DKMA',
   creator: 'jak',
+  season: 'Rabi',
+  start_period: 105,
+  end_period: 120,
 };
 
 function tagMap(item: any): Record<string, string> {
@@ -77,6 +80,9 @@ describe('buildAdvisoryOnSearch', () => {
       status: 'success',
       message: '',
       'hit-count': '1',
+      'location-status': 'not_requested',
+      'has-day-range': 'false',
+      'days-matched': 'false',
       'search-backend': 'qdrant',
     });
   });
@@ -97,5 +103,28 @@ describe('buildAdvisoryOnSearch', () => {
       context: CONTEXT, query: 'q', results: [{ ...HIT, chunk_id: '' }], status: 'success',
     });
     expect(out.message.catalog.providers[0].items[0].id).toBe('row-1:0');
+  });
+
+  it('reports location status, day range and days-matched in the search context', () => {
+    const out = buildAdvisoryOnSearch({
+      context: CONTEXT,
+      query: 'q',
+      results: [HIT],
+      status: 'success',
+      locationStatus: 'location_not_applied',
+      hasDayRange: true,
+      daysMatched: true,
+    });
+    const ctx = contextMap(out.message.catalog);
+    expect(ctx['location-status']).toBe('location_not_applied');
+    expect(ctx['has-day-range']).toBe('true');
+    expect(ctx['days-matched']).toBe('true');
+  });
+
+  it('defaults to not_requested and false flags for existing callers', () => {
+    const ctx = contextMap(buildAdvisoryOnSearch({ context: CONTEXT, query: 'q', results: [], status: 'not_found' }).message.catalog);
+    expect(ctx['location-status']).toBe('not_requested');
+    expect(ctx['has-day-range']).toBe('false');
+    expect(ctx['days-matched']).toBe('false');
   });
 });
