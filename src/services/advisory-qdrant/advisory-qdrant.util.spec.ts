@@ -9,6 +9,7 @@ import {
   cleanTagValue,
   parseAdvisoryParams,
   rankHits,
+  seasonList,
   resolvePreferredSeason,
 } from './advisory-qdrant.util';
 
@@ -224,6 +225,12 @@ describe('rankHits', () => {
     expect(out.map((h) => h.chunk_id)).toEqual(['r', 'k']);
   });
 
+  it('matches an entry that lists several seasons, e.g. "Rabi,Kharif"', () => {
+    const both = hit({ chunk_id: 'b', season: 'Rabi,Kharif', score: 0.7, pop_id: 3 });
+    const out = rankHits([kharif, both], { preferredSeason: 'rabi', daysAfterSowing: null });
+    expect(out.map((h) => h.chunk_id)).toEqual(['b', 'k']);
+  });
+
   it('keeps score order when there is no preference', () => {
     const out = rankHits([rabi, kharif], { preferredSeason: '', daysAfterSowing: null });
     expect(out.map((h) => h.chunk_id)).toEqual(['k', 'r']);
@@ -258,5 +265,12 @@ describe('rankHits', () => {
   it('exposes boosts large enough to matter between close scores', () => {
     expect(SEASON_BOOST).toBeGreaterThan(0.05);
     expect(DAYS_BOOST).toBeGreaterThan(SEASON_BOOST);
+  });
+});
+
+describe('seasonList', () => {
+  it('splits a multi-season value and lowercases it', () => {
+    expect(seasonList('Rabi,Kharif, Zaid')).toEqual(['rabi', 'kharif', 'zaid']);
+    expect(seasonList('')).toEqual([]);
   });
 });

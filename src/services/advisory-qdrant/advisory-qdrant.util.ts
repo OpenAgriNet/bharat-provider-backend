@@ -194,6 +194,14 @@ export function hasDayRange(hit: AdvisoryHit): boolean {
  * boost to the score. Ranges in the source data are loose, so these are preferences only.
  * Returns a new array sorted by boosted score (best first).
  */
+/** Seasons of an entry as a lowercase list: the data stores several as one text, e.g. "Rabi,Kharif". */
+export function seasonList(value: string): string[] {
+  return String(value ?? '')
+    .split(/[,;/]/)
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 export function rankHits(
   hits: AdvisoryHit[],
   options: { preferredSeason: string; daysAfterSowing: number | null },
@@ -201,7 +209,7 @@ export function rankHits(
   const season = options.preferredSeason.trim().toLowerCase();
   const boosted = hits.map((hit) => {
     let adjusted = hit.score;
-    if (season && hit.season.trim().toLowerCase() === season) adjusted += SEASON_BOOST;
+    if (season && seasonList(hit.season).includes(season)) adjusted += SEASON_BOOST;
     if (daysInRange(hit, options.daysAfterSowing)) adjusted += DAYS_BOOST;
     return { hit, adjusted };
   });
