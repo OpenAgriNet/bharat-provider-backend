@@ -93,6 +93,15 @@ export function normalizeCrop(raw: unknown): string {
     .join(' ');
 }
 
+/** Longest tag value kept (crop, district, season). */
+export const MAX_TAG_LENGTH = 100;
+
+/** Strip control characters (so values are safe to log and filter on), trim, and cap the length. */
+export function cleanTagValue(raw: unknown, max = MAX_TAG_LENGTH): string {
+  // eslint-disable-next-line no-control-regex
+  return String(raw ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max).trim();
+}
+
 function toInt(raw: unknown): number | null {
   const text = String(raw ?? '').trim();
   if (!/^-?\d+$/.test(text)) return null;
@@ -122,7 +131,7 @@ export function parseAdvisoryParams(body: any): AdvisorySearchParams {
     const list: any[] = Array.isArray(tag?.list) ? tag.list : [];
     for (const entry of list) {
       const code = String(entry?.descriptor?.code || entry?.name || '').toLowerCase();
-      const value = String(entry?.value ?? '').trim();
+      const value = cleanTagValue(entry?.value);
       if (!value) continue;
       switch (code) {
         case 'query':

@@ -5,6 +5,8 @@ import {
   dedupeByPop,
   formatSource,
   normalizeCrop,
+  MAX_TAG_LENGTH,
+  cleanTagValue,
   parseAdvisoryParams,
   rankHits,
   resolvePreferredSeason,
@@ -172,6 +174,29 @@ describe('parseAdvisoryParams', () => {
   it('keeps the descriptor name as the query over a query tag', () => {
     expect(parseAdvisoryParams(intent([['query', 'other']], 'from descriptor')).query).toBe('from descriptor');
     expect(parseAdvisoryParams(intent([['query', 'from tag']], null)).query).toBe('from tag');
+  });
+});
+
+describe('cleanTagValue and tag sanitizing', () => {
+  it('removes control characters, trims and caps the length', () => {
+    expect(cleanTagValue('Luck\nnow\r\u0000')).toBe('Luck now');
+    expect(cleanTagValue('x'.repeat(500))).toHaveLength(MAX_TAG_LENGTH);
+    expect(cleanTagValue(undefined)).toBe('');
+  });
+
+  it('applies to crop, district and season so they cannot forge log lines', () => {
+    const p = parseAdvisoryParams(
+      intent([
+        ['crop', 'wheat\n[advisory-qdrant] forged'],
+        ['district', 'Lucknow\r\nERROR forged'],
+        ['season', 'Rabi\u0007'],
+      ]),
+    );
+    for (const value of [p.crop, p.district, p.season]) {
+      expect(value).not.toMatch(/[\u0000-\u001f\u007f]/);
+    }
+    expect(p.district).toBe('Lucknow ERROR forged');
+    expect(p.season).toBe('Rabi');
   });
 });
 

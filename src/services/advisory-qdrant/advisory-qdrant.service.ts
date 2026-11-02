@@ -41,9 +41,9 @@ export class AdvisoryQdrantService {
     const preferredSeason = resolvePreferredSeason(params.season);
 
     this.logger.log(
-      `[advisory-qdrant] → txn=${txn} query=${JSON.stringify(query)} crop=${crop || '-'} district=${
-        district || '-'
-      } days=${daysAfterSowing ?? '-'} season=${preferredSeason || '-'} topK=${topK}`,
+      `[advisory-qdrant] → txn=${txn} query=${JSON.stringify(query)} crop=${JSON.stringify(crop)} district=${JSON.stringify(
+        district,
+      )} days=${daysAfterSowing ?? '-'} season=${JSON.stringify(preferredSeason)} topK=${topK}`,
     );
 
     const respond = (
