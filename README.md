@@ -238,6 +238,12 @@ Missing optional fields are omitted. OTPs and request fulfillments are never ech
 A missing grievance returns `not_found`, no registered mobile returns `invalid_mobile`,
 and wrong/expired/used OTPs return `invalid_otp`. Authentication failures return
 `configuration_error`; SMS/transport failures return `upstream_error`.
+For HTTP 400, the documented `grievanceNo is required` and `otp is required`
+messages produce field-specific explanations. An unidentified verification
+validation error is not labeled an incorrect ID or OTP. Unknown upstream messages
+are not echoed, so diagnostics cannot leak secrets. HTTP 404 asks the farmer to
+recheck the grievance ID in the registered-mobile SMS; HTTP 401 OTP errors retain
+the documented "invalid or expired" ambiguity instead of guessing the cause.
 
 Run focused tests:
 

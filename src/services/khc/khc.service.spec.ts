@@ -390,6 +390,47 @@ describe("KhcService", () => {
     expect(result.message.order.tags[0].descriptor.code).toBe("configuration_error");
   });
 
+  it.each([
+    ["get_status_otp", 400, "grievanceNo is required", "invalid_request", "grievance ID is missing", "OTP"],
+    ["verify_status_otp", 400, "grievanceNo is required", "invalid_request", "grievance ID is missing", "OTP"],
+    ["verify_status_otp", 400, "otp is required", "invalid_request", "OTP is missing", "grievance ID"],
+    ["get_status_otp", 400, "Other validation failure", "invalid_request", "rejected the grievance ID", "OTP"],
+    ["verify_status_otp", 400, "Other validation failure", "invalid_request", "did not identify which detail", "incorrect OTP"],
+    ["get_status_otp", 404, "Grievance not found", "not_found", "grievance ID in the SMS", "OTP"],
+    ["verify_status_otp", 404, "Grievance not found", "not_found", "grievance ID in the SMS", "OTP"],
+    ["verify_status_otp", 401, "Invalid or expired OTP", "invalid_otp", "Invalid or expired OTP", "incorrect grievance"],
+    ["get_status_otp", 422, "No valid mobile number registered for this grievance", "invalid_mobile", "No valid mobile", "incorrect OTP"],
+    ["get_status_otp", 502, "Failed to send OTP", "upstream_error", "could not send the OTP", "incorrect grievance"],
+  ])("preserves the reason for %s HTTP %s: %s", async (request_type, status, message, code, expected, absent) => {
+    http.request.mockRejectedValueOnce({
+      isAxiosError: true, response: { status, data: { status: String(status), message, data: null } },
+    });
+    const result = await service.handle(
+      body({ request_type, grievanceNo: "UP/231026/5", otp: "012345" }), "on_status"
+    );
+    const tag = result.message.order.tags[0];
+    expect(result.message.order.state).toBe("FAILED");
+    expect(tag.descriptor.code).toBe(code);
+    expect(tag.descriptor.short_desc).toContain(expected);
+    expect(tag.descriptor.short_desc).not.toContain(absent);
+    expect(tag).not.toHaveProperty("list");
+    expect(JSON.stringify(result)).not.toContain("012345");
+    expect(http.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not echo an unrecognized upstream validation message", async () => {
+    http.request.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { status: 400, data: { message: "private diagnostic with OTP 012345 and secret-key" } },
+    });
+    const result = await service.handle(
+      body({ request_type: "verify_status_otp", grievanceNo: "UP/231026/5", otp: "012345" }), "on_status"
+    );
+    expect(result.message.order.tags[0].descriptor.short_desc).toContain("did not identify which detail");
+    expect(JSON.stringify(result)).not.toContain("secret-key");
+    expect(JSON.stringify(logError.mock.calls)).not.toContain("secret-key");
+  });
+
   it("preserves full status details and nulls without granting registration verification", async () => {
     const data = {
       ...success.data, externalReferenceNo: "STATE-REF-10045", historyId: 1532, escalationId: 4871,

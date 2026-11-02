@@ -191,8 +191,25 @@ export class KhcService {
           );
         }
         if (status === 400) {
+          const message = record(errorBody) && typeof errorBody.message === "string"
+            ? errorBody.message.trim().toLowerCase()
+            : "";
+          if (message === "grievanceno is required") {
+            throw new KhcError(
+              "KHC says the grievance ID is missing. Please check the ID in your SMS.",
+              "invalid_request"
+            );
+          }
+          if (verifiesStatusOtp && message === "otp is required") {
+            throw new KhcError(
+              "KHC says the OTP is missing. Please share the 6-digit OTP again.",
+              "invalid_request"
+            );
+          }
           throw new KhcError(
-            "KHC rejected the grievance number or OTP. Please check the details.",
+            sendsStatusOtp
+              ? "KHC rejected the grievance ID. Please check the full ID in your SMS."
+              : "KHC rejected the status request but did not identify which detail is invalid. Please try again later.",
             "invalid_request"
           );
         }
@@ -208,7 +225,7 @@ export class KhcService {
       }
       if (status === 404 && (sendsStatusOtp || verifiesStatusOtp)) {
         throw new KhcError(
-          "Grievance not found. Please check the grievance number.",
+          "Grievance not found. Please check the grievance ID in the SMS on your registered mobile number.",
           "not_found"
         );
       }
