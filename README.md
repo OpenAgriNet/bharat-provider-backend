@@ -96,7 +96,8 @@ Icar provider service is reference app for adding contents related to vistaar ne
 
 The `khc-agri` provider supports new and existing farmers. Registration follows
 **send OTP -> verify OTP -> collect/confirm grievance details -> create grievance**.
-Status lookup asks only for the grievance number and does not require OTP.
+Status lookup uses a separate **grievance number -> send status OTP -> verify OTP
+and return status** flow. It never asks for a mobile number.
 
 Set these variables in the provider backend environment (not the browser):
 
@@ -213,10 +214,54 @@ confirmed grievance fields. Per the KHC guide, resending the same reference retu
 the existing grievance instead of creating another. After a timeout or malformed
 creation response, do not blindly submit a new reference; verify with KHC first.
 
-Status is sent upstream as
-`GET /v1/state/grievances/status?grievanceNo=<encoded number>`, not as a header.
-Successful results include the grievance number, status, current level and date
-when provided. A missing grievance is an explicit `not_found` result.
+Status follows the KHC **28 October 2026 Grievance Status with OTP** guide.
+Both steps use Beckn `/status`, provider `khc-agri`, item `khc-grievance`, with
+inputs in customer person tags:
+
+| `request_type` | Required tags | Upstream call | Result code |
+| --- | --- | --- | --- |
+| `get_status_otp` | `grievanceNo` | `POST /v1/state/grievances/check-status?grievanceNo=<encoded number>` (no body) | `status_otp_sent` |
+| `verify_status_otp` | `grievanceNo`, `otp` (six-digit string) | `POST /v1/state/grievances/verify-otp` with JSON `{ "grievanceNo": "...", "otp": "..." }` | `grievance_status` |
+
+These paths are relative to the existing `KHC_BASE_URL`, which already includes
+the API prefix; do not add another `/api`. Both calls use ApiKey authorization.
+The send response has `status` and `message`, without `data`. Only verification
+returns grievance details. The old direct GET status endpoint is no longer used.
+
+Both status operations validate `grievanceNo` before calling KHC: two ASCII letters,
+a nonempty numeric middle section and a positive digit-only sequence separated by
+slashes, for example `BR/240926/1` or `JK/2310261/1`, with at most 100 characters
+after trimming. The prefix is
+uppercased and leading zeros are preserved, including in the resend-limit key.
+Zero-only sequences, malformed values and non-string tags return `invalid_request`
+without sending SMS. The OAN agent converts regional digits before forwarding.
+Only the structure is checked locally, not the middle section's length, calendar
+validity or grievance existence. `grievanceNo` is assigned by the KHC creation API
+and passed through unchanged, not calculated from the state/date by this provider.
+The caller's separate `externalReferenceNo` must not be used as the status ID.
+OTP verification continues to require exactly six digits.
+
+KHC sends the OTP to the mobile registered on the grievance and enforces its
+five-minute lifetime, single use and invalidation on resend. No registration
+session/token is created or reused for status. Incorrect OTPs can be corrected
+until expiry; expired or used OTPs require another send. Do not automatically retry
+either POST. The existing send-limit settings also apply per grievance number
+(separate from registration's per-mobile limits); registration's five-attempt
+verification limit does not apply to status.
+
+Verified results preserve grievance/external reference numbers, status, current
+level, date, internal history/escalation IDs and JSON-encoded `address` and
+`escalationHistory` tags, including officer comments and nullable nested fields.
+Missing optional fields are omitted. OTPs and request fulfillments are never echoed.
+A missing grievance returns `not_found`, no registered mobile returns `invalid_mobile`,
+and wrong/expired/used OTPs return `invalid_otp`. Authentication failures return
+`configuration_error`; SMS/transport failures return `upstream_error`.
+For HTTP 400, the documented `grievanceNo is required` and `otp is required`
+messages produce field-specific explanations. An unidentified verification
+validation error is not labeled an incorrect ID or OTP. Unknown upstream messages
+are not echoed, so diagnostics cannot leak secrets. HTTP 404 asks the farmer to
+recheck the grievance ID in the registered-mobile SMS; HTTP 401 OTP errors retain
+the documented "invalid or expired" ambiguity instead of guessing the cause.
 
 Run focused tests:
 

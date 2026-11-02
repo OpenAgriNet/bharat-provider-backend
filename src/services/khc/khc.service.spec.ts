@@ -97,15 +97,36 @@ describe("KhcService", () => {
     http.request.mockClear();
   }
 
-  it("sends the grievance number as a query parameter with ApiKey auth and no cookie", async () => {
-    await expect(service.getStatus("BR/240926/2")).resolves.toEqual(
+  it("sends status OTP by POST query with no body and accepts a response without data", async () => {
+    http.request.mockResolvedValueOnce({
+      data: { status: "200 OK", message: "OTP sent successfully" },
+    });
+    const result = await service.handle(
+      body({ request_type: "get_status_otp", grievanceNo: "BR/240926/2" }),
+      "on_status"
+    );
+    expect(result.message.order.tags[0].descriptor.code).toBe("status_otp_sent");
+    const request = http.request.mock.calls[0][0];
+    expect(request).toEqual(expect.objectContaining({
+      method: "POST",
+      url: "https://khc.test/khc/api/api/v1/state/grievances/check-status",
+      params: { grievanceNo: "BR/240926/2" },
+      headers: { "Content-Type": "application/json", Authorization: "ApiKey test-key" },
+    }));
+    expect(jest.requireActual("axios").getUri(request)).toContain("grievanceNo=BR%2F240926%2F2");
+    expect(request).not.toHaveProperty("data");
+    expect(result.message.order).not.toHaveProperty("fulfillments");
+  });
+
+  it("verifies status OTP with ApiKey auth and no mobile or cookie", async () => {
+    await expect(service.getStatus("BR/240926/2", "012345")).resolves.toEqual(
       success.data
     );
     expect(http.request).toHaveBeenCalledWith(
       expect.objectContaining({
-        method: "GET",
-        url: "https://khc.test/khc/api/api/v1/state/grievances/status",
-        params: { grievanceNo: "BR/240926/2" },
+        method: "POST",
+        url: "https://khc.test/khc/api/api/v1/state/grievances/verify-otp",
+        data: { grievanceNo: "BR/240926/2", otp: "012345" },
         headers: {
           "Content-Type": "application/json",
           Authorization: "ApiKey test-key",
@@ -114,6 +135,40 @@ describe("KhcService", () => {
       })
     );
   });
+
+  it.each([
+    {}, { status: "200 OK" }, { status: "200 OK", message: "" },
+    { status: "200 OK", message: 1 }, { status: "400 BAD_REQUEST", message: "Invalid number" },
+  ])("rejects malformed status OTP acknowledgements %j", async (data) => {
+    http.request.mockResolvedValueOnce({ data });
+    await expect(service.sendStatusOtp("BR/240926/2")).rejects.toThrow("invalid or unsuccessful");
+    http.request.mockResolvedValueOnce({ data: { status: "200 OK", message: "OTP sent successfully" } });
+    await expect(service.sendStatusOtp("BR/240926/2")).resolves.toBeUndefined();
+    expect(http.request).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["OPEN", "CLOSED", "PARTIAL_CLOSED"])(
+    "returns %s with nullable optional details and never caches verified status",
+    async (currentStatus) => {
+      http.request.mockResolvedValueOnce({
+        data: { ...success, data: { ...success.data, currentStatus, address: null, escalationHistory: null } },
+      });
+      const input = body({ request_type: "verify_status_otp", grievanceNo: "BR/240926/2", otp: "012345" });
+      const result = await service.handle(input, "on_status");
+      const fields = Object.fromEntries(
+        result.message.order.tags[0].list.map((tag) => [tag.descriptor.code, tag.value])
+      );
+      expect(fields.currentStatus).toBe(currentStatus);
+      expect(fields).not.toHaveProperty("address");
+      expect(fields).not.toHaveProperty("escalationHistory");
+      http.request.mockRejectedValueOnce({
+        isAxiosError: true, response: { status: 401, data: { status: "401 UNAUTHORIZED", data: null } },
+      });
+      const replay = await service.handle(input, "on_status");
+      expect(replay.message.order.tags[0].descriptor.code).toBe("invalid_otp");
+      expect(http.request).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it.each(["existing", "new"])(
     "creates a grievance for a %s farmer with numeric IDs",
@@ -163,10 +218,91 @@ describe("KhcService", () => {
     expect(http.request).not.toHaveBeenCalled();
   });
 
-  it.each(["", "abc\r\nInjected: yes", "a".repeat(101)])(
+  it.each([
+    "", "abc\r\nInjected: yes", "a".repeat(101), "123456", "9876543210", "BR2409261", "BR-240926-1",
+    "B/240926/1", "BHR/240926/1", "12/240926/1", "BR//1",
+    "BR/24A926/1", "BR/240926/0", "BR/240926/000", "BR/240926/-1", "BR/240926/+1",
+    "BR/240926/1.5", "BR/240926/", "BR/240926/1/2", "BR /240926/1", "BR/240926/1\n2",
+    "BR/240926/" + "1".repeat(91), "\u00df/240926/1", "\u0131R/240926/1",
+  ])(
     "rejects invalid grievance number %j",
     async (number) => {
-      await expect(service.getStatus(number)).rejects.toThrow();
+      await expect(service.getStatus(number, "012345")).rejects.toThrow("BR/240926/1");
+      await expect(service.sendStatusOtp(number)).rejects.toThrow("BR/240926/1");
+      for (const request_type of ["get_status_otp", "verify_status_otp"]) {
+        const result = await service.handle(
+          body({ request_type, grievanceNo: number, otp: "012345" }), "on_status"
+        );
+        expect(result.message.order.tags[0].descriptor.code).toBe("invalid_request");
+        expect(result.message.order.tags[0].descriptor.short_desc).toContain("BR/240926/1");
+      }
+      expect(http.request).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    [" br/240926/0002 ", "BR/240926/0002"],
+    [" jk/2310261/1 ", "JK/2310261/1"],
+    ["JK/23102612/0001", "JK/23102612/0001"],
+    ["BR/24092/1", "BR/24092/1"],
+    ["UP/000000/1", "UP/000000/1"],
+    ["BR/999999/1", "BR/999999/1"],
+    ["BR/240926/" + "0".repeat(89) + "1", "BR/240926/" + "0".repeat(89) + "1"],
+  ])("normalizes valid grievance number %s without date validation", async (input, grievanceNo) => {
+    http.request.mockResolvedValueOnce({ data: { status: "200 OK", message: "OTP sent successfully" } });
+    const sent = await service.handle(body({ request_type: "get_status_otp", grievanceNo: input }), "on_status");
+    expect(sent.message.order.tags[0].descriptor.code).toBe("status_otp_sent");
+    expect(http.request.mock.calls[0][0].params).toEqual({ grievanceNo });
+    http.request.mockResolvedValueOnce({ data: { ...success, data: { ...success.data, grievanceNo } } });
+    const verified = await service.handle(
+      body({ request_type: "verify_status_otp", grievanceNo: input, otp: "012345" }), "on_status"
+    );
+    expect(verified.message.order.tags[0].descriptor.code).toBe("grievance_status");
+    expect(http.request.mock.calls[1][0].data).toEqual({ grievanceNo, otp: "012345" });
+  });
+
+  it("uses the normalized grievance number for resend limits", async () => {
+    http.request.mockResolvedValueOnce({ data: { status: "200 OK", message: "OTP sent successfully" } });
+    await service.sendStatusOtp(" br/240926/2 ");
+    await expect(service.sendStatusOtp("BR/240926/2")).rejects.toThrow("wait");
+    expect(http.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the KHC-generated grievance ID unchanged for status, not the external reference", async () => {
+    const grievanceNo = "JK/2310261/1";
+    await verified();
+    http.request.mockResolvedValueOnce({
+      data: { status: "201 CREATED", data: { grievanceNo, externalReferenceNo: existing.externalReferenceNo } },
+    });
+    const created = await service.createGrievance(existing, "tx");
+    expect(created.grievanceNo).toBe(grievanceNo);
+    expect(http.request.mock.calls[0][0].data).not.toHaveProperty("grievanceNo");
+    expect(http.request.mock.calls[0][0].data).toHaveProperty("externalReferenceNo", existing.externalReferenceNo);
+    http.request.mockResolvedValueOnce({ data: { status: "200 OK", message: "OTP sent successfully" } });
+    const sent = await service.handle(body({ request_type: "get_status_otp", grievanceNo: created.grievanceNo }), "on_status");
+    expect(sent.message.order.tags[0].descriptor.code).toBe("status_otp_sent");
+    expect(http.request.mock.calls[1][0].params).toEqual({ grievanceNo });
+    http.request.mockResolvedValueOnce({ data: { ...success, data: { ...success.data, grievanceNo } } });
+    const status = await service.handle(
+      body({ request_type: "verify_status_otp", grievanceNo: created.grievanceNo, otp: "012345" }), "on_status"
+    );
+    expect(status.message.order.tags[0].descriptor.code).toBe("grievance_status");
+    expect(http.request.mock.calls[2][0].data).toEqual({ grievanceNo, otp: "012345" });
+  });
+
+  it.each([[undefined], [null], [123456], [["BR/240926/2"]], [{ grievanceNo: "BR/240926/2" }]])(
+    "rejects non-string grievance tags %j without HTTP",
+    async (value) => {
+      for (const request_type of ["get_status_otp", "verify_status_otp"]) {
+        const result = await service.handle({
+          message: { order: { fulfillments: [{ customer: { person: { tags: [
+            { descriptor: { code: "request_type" }, value: request_type },
+            { descriptor: { code: "grievanceNo" }, value },
+          ] } } }] } },
+        }, "on_status");
+        expect(result.message.order.tags[0].descriptor.code).toBe("invalid_request");
+        expect(result.message.order.tags[0].descriptor.short_desc).toContain("BR/240926/1");
+      }
       expect(http.request).not.toHaveBeenCalled();
     }
   );
@@ -175,7 +311,7 @@ describe("KhcService", () => {
     service = new KhcService(
       new ConfigService({ KHC_BASE_URL: "", KHC_API_KEY: "" })
     );
-    await expect(service.getStatus("BR/240926/2")).rejects.toThrow(
+    await expect(service.getStatus("BR/240926/2", "012345")).rejects.toThrow(
       "not configured"
     );
     expect(http.request).not.toHaveBeenCalled();
@@ -187,7 +323,7 @@ describe("KhcService", () => {
     { status: "400 BAD_REQUEST", message: "Invalid village" },
   ])("rejects malformed or failed API payloads %j", async (data) => {
     http.request.mockResolvedValue({ status: 200, data });
-    await expect(service.getStatus("BR/240926/2")).rejects.toThrow();
+    await expect(service.getStatus("BR/240926/2", "012345")).rejects.toThrow();
   });
 
   it("reports not found and transport failures without exposing credentials", async () => {
@@ -195,9 +331,9 @@ describe("KhcService", () => {
       isAxiosError: true,
       response: { status: 404 },
     });
-    await expect(service.getStatus("BR/240926/2")).rejects.toThrow("not found");
+    await expect(service.getStatus("BR/240926/2", "012345")).rejects.toThrow("not found");
     http.request.mockRejectedValueOnce(new Error("secret URL or credentials"));
-    await expect(service.getStatus("BR/240926/2")).rejects.toThrow(
+    await expect(service.getStatus("BR/240926/2", "012345")).rejects.toThrow(
       "could not be reached"
     );
     expect(JSON.stringify(logError.mock.calls)).not.toContain("secret");
@@ -214,7 +350,7 @@ describe("KhcService", () => {
 
   it("maps status into a Beckn order without echoing farmer inputs", async () => {
     const result = await service.handle(
-      body({ grievanceNo: "BR/240926/2" }),
+      body({ request_type: "verify_status_otp", grievanceNo: "BR/240926/2", otp: "012345" }),
       "on_status"
     );
     expect(result.context.action).toBe("on_status");
@@ -226,6 +362,157 @@ describe("KhcService", () => {
       value: "OPEN",
     });
     expect(result.message.order).not.toHaveProperty("fulfillments");
+    expect(JSON.stringify(result)).not.toContain("012345");
+  });
+
+  it.each(["", "12345", "1234567", "abcdef", 123456])(
+    "rejects invalid status OTP %j without HTTP",
+    async (otp) => {
+      await expect(service.getStatus("BR/240926/2", otp)).rejects.toThrow("6-digit");
+      expect(http.request).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([undefined, "unknown", "verify_otp"])(
+    "rejects missing or unsupported status request type %s",
+    async (request_type) => {
+      const result = await service.handle(body({ grievanceNo: "BR/240926/2", request_type }), "on_status");
+      expect(result.message.order.tags[0].descriptor.code).toBe("invalid_request");
+      expect(http.request).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["get_status_otp", 404, "not_found"],
+    ["get_status_otp", 422, "invalid_mobile"],
+    ["get_status_otp", 502, "upstream_error"],
+    ["get_status_otp", 400, "invalid_request"],
+    ["get_status_otp", 401, "configuration_error"],
+    ["verify_status_otp", 401, "invalid_otp"],
+    ["verify_status_otp", 404, "not_found"],
+    ["verify_status_otp", 400, "invalid_request"],
+    ["verify_status_otp", 500, "upstream_error"],
+  ])("maps %s HTTP %s to %s without retry", async (request_type, status, code) => {
+    http.request.mockRejectedValueOnce({ isAxiosError: true, response: { status } });
+    const result = await service.handle(
+      body({ request_type, grievanceNo: "BR/240926/2", otp: "012345" }), "on_status"
+    );
+    expect(result.message.order.state).toBe("FAILED");
+    expect(result.message.order.tags[0].descriptor.code).toBe(code);
+    expect(http.request).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain("012345");
+  });
+
+  it("distinguishes an API key failure from an invalid status OTP", async () => {
+    http.request.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { status: 401, data: { status: "ERROR", message: "Invalid API key" } },
+    });
+    const result = await service.handle(
+      body({ request_type: "verify_status_otp", grievanceNo: "BR/240926/2", otp: "012345" }),
+      "on_status"
+    );
+    expect(result.message.order.tags[0].descriptor.code).toBe("configuration_error");
+  });
+
+  it.each([
+    ["get_status_otp", 400, "grievanceNo is required", "invalid_request", "grievance ID is missing", "OTP"],
+    ["verify_status_otp", 400, "grievanceNo is required", "invalid_request", "grievance ID is missing", "OTP"],
+    ["verify_status_otp", 400, "otp is required", "invalid_request", "OTP is missing", "grievance ID"],
+    ["get_status_otp", 400, "Other validation failure", "invalid_request", "rejected the grievance ID", "OTP"],
+    ["verify_status_otp", 400, "Other validation failure", "invalid_request", "did not identify which detail", "incorrect OTP"],
+    ["get_status_otp", 404, "Grievance not found", "not_found", "grievance ID in the SMS", "OTP"],
+    ["verify_status_otp", 404, "Grievance not found", "not_found", "grievance ID in the SMS", "OTP"],
+    ["verify_status_otp", 401, "Invalid or expired OTP", "invalid_otp", "Invalid or expired OTP", "incorrect grievance"],
+    ["get_status_otp", 422, "No valid mobile number registered for this grievance", "invalid_mobile", "No valid mobile", "incorrect OTP"],
+    ["get_status_otp", 502, "Failed to send OTP", "upstream_error", "could not send the OTP", "incorrect grievance"],
+  ])("preserves the reason for %s HTTP %s: %s", async (request_type, status, message, code, expected, absent) => {
+    http.request.mockRejectedValueOnce({
+      isAxiosError: true, response: { status, data: { status: String(status), message, data: null } },
+    });
+    const result = await service.handle(
+      body({ request_type, grievanceNo: "UP/231026/5", otp: "012345" }), "on_status"
+    );
+    const tag = result.message.order.tags[0];
+    expect(result.message.order.state).toBe("FAILED");
+    expect(tag.descriptor.code).toBe(code);
+    expect(tag.descriptor.short_desc).toContain(expected);
+    expect(tag.descriptor.short_desc).not.toContain(absent);
+    expect(tag).not.toHaveProperty("list");
+    expect(JSON.stringify(result)).not.toContain("012345");
+    expect(http.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not echo an unrecognized upstream validation message", async () => {
+    http.request.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { status: 400, data: { message: "private diagnostic with OTP 012345 and secret-key" } },
+    });
+    const result = await service.handle(
+      body({ request_type: "verify_status_otp", grievanceNo: "UP/231026/5", otp: "012345" }), "on_status"
+    );
+    expect(result.message.order.tags[0].descriptor.short_desc).toContain("did not identify which detail");
+    expect(JSON.stringify(result)).not.toContain("secret-key");
+    expect(JSON.stringify(logError.mock.calls)).not.toContain("secret-key");
+  });
+
+  it("preserves full status details and nulls without granting registration verification", async () => {
+    const data = {
+      ...success.data, externalReferenceNo: "STATE-REF-10045", historyId: 1532, escalationId: 4871,
+      address: { state: "Bihar", district: "Patna", subDistrict: "Danapur", village: "Shahpur" },
+      escalationHistory: [{
+        escalationId: 4871, level: "L2", assignedTo: "District Agriculture Officer", isActive: true,
+        solutions: [{ at: "2026-09-28 14:10:22", comment: "Field visit scheduled" }],
+        source: "AUTO", reason: "SLA breached at L1", escalatedAt: "2026-09-27T09:00:04+05:30",
+        updatedAt: null,
+      }],
+    };
+    http.request.mockResolvedValueOnce({ data: { ...success, data } });
+    const result = await service.handle(
+      body({ request_type: "verify_status_otp", grievanceNo: "BR/240926/2", otp: "012345" }), "on_status"
+    );
+    const fields = Object.fromEntries(
+      result.message.order.tags[0].list.map((tag) => [tag.descriptor.code, tag.value])
+    );
+    expect(JSON.parse(fields.address)).toEqual(data.address);
+    expect(JSON.parse(fields.escalationHistory)).toEqual(data.escalationHistory);
+    expect(fields.historyId).toBe("1532");
+    await expect(service.createGrievance(existing, "tx")).rejects.toThrow("Send and verify");
+    expect(http.request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { grievanceNo: "OTHER" }, { currentStatus: "" }, { address: [] }, { escalationHistory: {} },
+  ])("rejects incomplete or mismatched verified status %j", async (overrides) => {
+    http.request.mockResolvedValueOnce({ data: { ...success, data: { ...success.data, ...overrides } } });
+    await expect(service.getStatus("BR/240926/2", "012345")).rejects.toThrow("incomplete grievance");
+  });
+
+  it("allows another OTP attempt after an upstream rejection without sending another SMS", async () => {
+    http.request.mockRejectedValueOnce({ isAxiosError: true, response: { status: 401 } });
+    await expect(service.getStatus("BR/240926/2", "999999")).rejects.toThrow("Invalid or expired OTP");
+    await expect(service.getStatus("BR/240926/2", "012345")).resolves.toEqual(success.data);
+    expect(http.request.mock.calls.every(([request]) => request.url.endsWith("/grievances/verify-otp"))).toBe(true);
+  });
+
+  it("applies resend limits to status OTPs separately from registration", async () => {
+    jest.useFakeTimers();
+    try {
+      http.request.mockResolvedValue({ data: { status: "200 OK", message: "OTP sent successfully" } });
+      await service.sendStatusOtp("BR/240926/2");
+      await expect(service.sendStatusOtp("BR/240926/2")).rejects.toThrow("wait");
+      for (let i = 0; i < 2; i++) {
+        jest.advanceTimersByTime(31000);
+        await service.sendStatusOtp("BR/240926/2");
+      }
+      jest.advanceTimersByTime(31000);
+      await expect(service.sendStatusOtp("BR/240926/2")).rejects.toThrow("Too many");
+      jest.advanceTimersByTime(3600000);
+      await service.sendStatusOtp("BR/240926/2");
+      expect(http.request).toHaveBeenCalledTimes(4);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("requires confirmation before registration", async () => {
@@ -511,7 +798,7 @@ describe("KhcService", () => {
     service = new KhcService(
       new ConfigService({ KHC_BASE_URL: url, KHC_API_KEY: "test-key" })
     );
-    await expect(service.getStatus("BR/240926/2")).rejects.toThrow(
+    await expect(service.getStatus("BR/240926/2", "012345")).rejects.toThrow(
       "valid HTTPS URL"
     );
     expect(http.request).not.toHaveBeenCalled();
@@ -556,7 +843,7 @@ describe("KhcService", () => {
     http.request.mockResolvedValueOnce({
       data: { status: "200 OK", data: {} },
     });
-    await expect(service.getStatus("BR/240926/2")).rejects.toThrow(
+    await expect(service.getStatus("BR/240926/2", "012345")).rejects.toThrow(
       "incomplete grievance"
     );
     await verified();
