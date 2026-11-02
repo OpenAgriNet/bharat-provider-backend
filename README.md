@@ -83,7 +83,8 @@ Icar provider service is reference app for adding contents related to vistaar ne
 
 The `khc-agri` provider supports new and existing farmers. Registration follows
 **send OTP -> verify OTP -> collect/confirm grievance details -> create grievance**.
-Status lookup asks only for the grievance number and does not require OTP.
+Status lookup uses a separate **grievance number -> send status OTP -> verify OTP
+and return status** flow. It never asks for a mobile number.
 
 Set these variables in the provider backend environment (not the browser):
 
@@ -200,10 +201,35 @@ confirmed grievance fields. Per the KHC guide, resending the same reference retu
 the existing grievance instead of creating another. After a timeout or malformed
 creation response, do not blindly submit a new reference; verify with KHC first.
 
-Status is sent upstream as
-`GET /v1/state/grievances/status?grievanceNo=<encoded number>`, not as a header.
-Successful results include the grievance number, status, current level and date
-when provided. A missing grievance is an explicit `not_found` result.
+Status follows the KHC **28 October 2026 Grievance Status with OTP** guide.
+Both steps use Beckn `/status`, provider `khc-agri`, item `khc-grievance`, with
+inputs in customer person tags:
+
+| `request_type` | Required tags | Upstream call | Result code |
+| --- | --- | --- | --- |
+| `get_status_otp` | `grievanceNo` | `POST /v1/state/grievances/check-status?grievanceNo=<encoded number>` (no body) | `status_otp_sent` |
+| `verify_status_otp` | `grievanceNo`, `otp` (six-digit string) | `POST /v1/state/grievances/verify-otp` with JSON `{ "grievanceNo": "...", "otp": "..." }` | `grievance_status` |
+
+These paths are relative to the existing `KHC_BASE_URL`, which already includes
+the API prefix; do not add another `/api`. Both calls use ApiKey authorization.
+The send response has `status` and `message`, without `data`. Only verification
+returns grievance details. The old direct GET status endpoint is no longer used.
+
+KHC sends the OTP to the mobile registered on the grievance and enforces its
+five-minute lifetime, single use and invalidation on resend. No registration
+session/token is created or reused for status. Incorrect OTPs can be corrected
+until expiry; expired or used OTPs require another send. Do not automatically retry
+either POST. The existing send-limit settings also apply per grievance number
+(separate from registration's per-mobile limits); registration's five-attempt
+verification limit does not apply to status.
+
+Verified results preserve grievance/external reference numbers, status, current
+level, date, internal history/escalation IDs and JSON-encoded `address` and
+`escalationHistory` tags, including officer comments and nullable nested fields.
+Missing optional fields are omitted. OTPs and request fulfillments are never echoed.
+A missing grievance returns `not_found`, no registered mobile returns `invalid_mobile`,
+and wrong/expired/used OTPs return `invalid_otp`. Authentication failures return
+`configuration_error`; SMS/transport failures return `upstream_error`.
 
 Run focused tests:
 
