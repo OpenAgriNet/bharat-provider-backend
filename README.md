@@ -216,12 +216,17 @@ The send response has `status` and `message`, without `data`. Only verification
 returns grievance details. The old direct GET status endpoint is no longer used.
 
 Both status operations validate `grievanceNo` before calling KHC: two ASCII letters,
-six ASCII digits and a positive digit-only sequence separated by slashes, for
-example `BR/240926/1`, with at most 100 characters after trimming. The prefix is
+a nonempty numeric middle section and a positive digit-only sequence separated by
+slashes, for example `BR/240926/1` or `JK/2310261/1`, with at most 100 characters
+after trimming. The prefix is
 uppercased and leading zeros are preserved, including in the resend-limit key.
 Zero-only sequences, malformed values and non-string tags return `invalid_request`
 without sending SMS. The OAN agent converts regional digits before forwarding.
-Only the format is checked locally, not calendar validity or grievance existence.
+Only the structure is checked locally, not the middle section's length, calendar
+validity or grievance existence. `grievanceNo` is assigned by the KHC creation API
+and passed through unchanged, not calculated from the state/date by this provider.
+The caller's separate `externalReferenceNo` must not be used as the status ID.
+OTP verification continues to require exactly six digits.
 
 KHC sends the OTP to the mobile registered on the grievance and enforces its
 five-minute lifetime, single use and invalidation on resend. No registration

@@ -555,10 +555,10 @@ export class KhcService {
     const number = typeof value === "string" ? value.trim() : "";
     if (
       number.length > 100 ||
-      !/^[A-Za-z]{2}\/[0-9]{6}\/0*[1-9][0-9]*$/.test(number)
+      !/^[A-Za-z]{2}\/[0-9]+\/0*[1-9][0-9]*$/.test(number)
     ) {
       throw new KhcError(
-        "Please provide the full KHC grievance number from your SMS: two letters/six digits/positive sequence, for example BR/240926/1 (example only).",
+        "Please provide the full KHC grievance number from your SMS: two letters/numeric middle section/positive sequence, for example BR/240926/1 (example only).",
         "invalid_request"
       );
     }
