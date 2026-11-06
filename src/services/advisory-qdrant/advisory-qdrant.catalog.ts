@@ -1,16 +1,24 @@
-import { AdvisoryHit, formatSource } from './advisory-qdrant.util';
+import { AdvisoryHit, formatSource, isNational } from './advisory-qdrant.util';
 
 export type AdvisoryStatus = 'success' | 'not_found' | 'failed' | 'error';
 
 /**
- * How the farmer's district was handled:
- * - `not_requested`: no district was sent
- * - `location_matched`: advisories matched the district
- * - `location_not_applied`: a district was sent but no advisory carries location data, so the
- *   crop-level results were returned instead
- * - `no_match`: a district was sent and nothing matched at all
+ * How the farmer's place (state / district LGD codes) was handled:
+ * - `not_requested`: no place was sent
+ * - `location_matched`: at least one advisory covers the farmer's district or state
+ * - `location_partial`: the farmer gave a state and the best advisories cover some districts of it
+ * - `location_not_applied`: a place was sent but the advisories returned are not tied to a place
+ *   (they apply everywhere)
+ * - `other_only`: a place was sent and every returned advisory is meant for other places
+ * - `no_match`: a place was sent and nothing was found at all
  */
-export type LocationStatus = 'not_requested' | 'location_matched' | 'location_not_applied' | 'no_match';
+export type LocationStatus =
+  | 'not_requested'
+  | 'location_matched'
+  | 'location_partial'
+  | 'location_not_applied'
+  | 'other_only'
+  | 'no_match';
 
 export interface BuildAdvisoryCatalogOptions {
   context: any;
@@ -23,6 +31,8 @@ export interface BuildAdvisoryCatalogOptions {
   hasDayRange?: boolean;
   /** True when a days-after-sowing value was sent and a returned advisory's range contains it. */
   daysMatched?: boolean;
+  /** True when at least one returned advisory is tied to particular states or districts. */
+  hasLocationSpecific?: boolean;
 }
 
 const CATEGORY_CODE = 'knowledge-advisory';
@@ -46,6 +56,7 @@ export function buildAdvisoryOnSearch(options: BuildAdvisoryCatalogOptions) {
     locationStatus = 'not_requested',
     hasDayRange = false,
     daysMatched = false,
+    hasLocationSpecific = false,
   } = options;
 
   const items = results.map((hit, index) => {
@@ -74,6 +85,10 @@ export function buildAdvisoryOnSearch(options: BuildAdvisoryCatalogOptions) {
             tag('chunk_id', 'Chunk ID', hit.chunk_id),
             tag('source', 'Source', source),
             tag('text', 'Text', text),
+            tag('location-match', 'Location Match', hit.location_match ?? 'not_requested'),
+            tag('location-national', 'Applies Everywhere', String(isNational(hit))),
+            tag('location-states', 'Location States', (hit.location_state_names ?? []).join(', ')),
+            tag('location-districts', 'Location Districts', (hit.location_district_names ?? []).join(', ')),
           ],
         },
       ],
@@ -111,6 +126,10 @@ export function buildAdvisoryOnSearch(options: BuildAdvisoryCatalogOptions) {
               { descriptor: { code: 'location-status', name: 'Location Status' }, value: locationStatus },
               { descriptor: { code: 'has-day-range', name: 'Has Day Range' }, value: String(hasDayRange) },
               { descriptor: { code: 'days-matched', name: 'Days Matched' }, value: String(daysMatched) },
+              {
+                descriptor: { code: 'has-location-specific', name: 'Has Location Specific' },
+                value: String(hasLocationSpecific),
+              },
               { descriptor: { code: 'search-backend', name: 'Search Backend' }, value: 'qdrant' },
             ],
           },

@@ -16,6 +16,12 @@ function hit(overrides: Partial<AdvisoryHit>): AdvisoryHit {
     season: 'Rabi',
     start_period: 105,
     end_period: 120,
+    location_national: true,
+    location_state_codes: [],
+    location_statewide_codes: [],
+    location_district_codes: [],
+    location_state_names: [],
+    location_district_names: [],
     ...overrides,
   };
 }
@@ -182,57 +188,103 @@ describe('AdvisoryQdrantService', () => {
     });
   });
 
-  describe('district with parallel fallback', () => {
-    const general = hit({ chunk_id: 'g', pop_id: 1 });
-    const local = hit({ chunk_id: 'l', pop_id: 2 });
+  describe('location (state / district LGD codes)', () => {
+    const general = hit({ chunk_id: 'g', pop_id: 1, score: 0.8 });
+    const agra = hit({
+      chunk_id: 'agra',
+      pop_id: 2,
+      score: 0.7,
+      location_national: false,
+      location_state_codes: [9],
+      location_district_codes: [118],
+      location_state_names: ['Uttar Pradesh'],
+      location_district_names: ['Agra'],
+    });
+    const place = [['crop', 'wheat'], ['state_lgd_code', '9'], ['district_lgd_code', '118']] as Array<[string, string]>;
 
-    it('runs the district and crop-level queries on one embedding and uses the district results when present', async () => {
-      qdrant.queryAdvisoryPoints.mockImplementation(async (_v: number[], o: any) => (o.district ? [local] : [general]));
-      const out = await service.search(body('aphids', [['crop', 'wheat'], ['district', 'Lucknow']]));
+    function chunkTags(out: any, id: string): Record<string, string> {
+      const item = out.message.catalog.providers[0].items.find((i: any) => i.id === id);
+      const group = item.tags.find((t: any) => t.descriptor.code === 'chunk-details');
+      return Object.fromEntries(group.list.map((e: any) => [e.descriptor.code, e.value]));
+    }
+
+    it('runs one crop query and no longer filters on a district', async () => {
+      qdrant.queryAdvisoryPoints.mockResolvedValue([general, agra]);
+      await service.search(body('aphids', place));
       expect(embedding.embedQuery).toHaveBeenCalledTimes(1);
-      expect(qdrant.queryAdvisoryPoints).toHaveBeenCalledTimes(2);
-      expect(qdrant.queryAdvisoryPoints).toHaveBeenCalledWith([0.1, 0.2], { limit: 40, crop: 'Wheat', district: 'Lucknow' });
+      expect(qdrant.queryAdvisoryPoints).toHaveBeenCalledTimes(1);
       expect(qdrant.queryAdvisoryPoints).toHaveBeenCalledWith([0.1, 0.2], { limit: 40, crop: 'Wheat' });
-      expect(ids(out)).toEqual(['l']);
+    });
+
+    it('ranks the advisory that covers the farmer first and reports location_matched', async () => {
+      qdrant.queryAdvisoryPoints.mockResolvedValue([general, agra]);
+      const out = await service.search(body('aphids', place));
+      expect(ids(out)).toEqual(['agra', 'g']);
       expect(ctx(out)['location-status']).toBe('location_matched');
+      expect(ctx(out)['has-location-specific']).toBe('true');
+      expect(chunkTags(out, 'agra')['location-match']).toBe('matched');
+      expect(chunkTags(out, 'agra')['location-districts']).toBe('Agra');
+      expect(chunkTags(out, 'agra')['location-states']).toBe('Uttar Pradesh');
+      expect(chunkTags(out, 'g')['location-match']).toBe('national');
+      expect(chunkTags(out, 'g')['location-national']).toBe('true');
     });
 
-    it('falls back to crop-level results when nothing matches the district (location_not_applied)', async () => {
-      qdrant.queryAdvisoryPoints.mockImplementation(async (_v: number[], o: any) => (o.district ? [] : [general]));
-      const out = await service.search(body('aphids', [['crop', 'wheat'], ['district', 'Lucknow']]));
-      expect(ids(out)).toEqual(['g']);
+    it('still returns an advisory meant for other places, marked "other"', async () => {
+      qdrant.queryAdvisoryPoints.mockResolvedValue([agra]);
+      const out = await service.search(body('aphids', [['crop', 'wheat'], ['state_lgd_code', '27'], ['district_lgd_code', '521']]));
+      expect(ids(out)).toEqual(['agra']);
       expect(ctx(out).status).toBe('success');
+      expect(ctx(out)['location-status']).toBe('other_only');
+      expect(chunkTags(out, 'agra')['location-match']).toBe('other');
+    });
+
+    it('reports location_partial when only a state was given and the advisory lists districts of it', async () => {
+      qdrant.queryAdvisoryPoints.mockResolvedValue([agra]);
+      const out = await service.search(body('aphids', [['crop', 'wheat'], ['state_lgd_code', '9']]));
+      expect(ctx(out)['location-status']).toBe('location_partial');
+      expect(chunkTags(out, 'agra')['location-match']).toBe('state_partial');
+    });
+
+    it('reports location_not_applied when a place was sent but every advisory applies everywhere', async () => {
+      qdrant.queryAdvisoryPoints.mockResolvedValue([general]);
+      const out = await service.search(body('aphids', place));
       expect(ctx(out)['location-status']).toBe('location_not_applied');
+      expect(ctx(out)['has-location-specific']).toBe('false');
     });
 
-    it('treats a failing district query as no location match and still answers', async () => {
-      qdrant.queryAdvisoryPoints.mockImplementation(async (_v: number[], o: any) => {
-        if (o.district) throw new Error('unindexed filter rejected');
-        return [general];
-      });
-      const out = await service.search(body('aphids', [['crop', 'wheat'], ['district', 'Lucknow']]));
-      expect(ids(out)).toEqual(['g']);
-      expect(ctx(out)['location-status']).toBe('location_not_applied');
+    it('reports not_requested but still says an advisory is location-specific when no place is sent', async () => {
+      qdrant.queryAdvisoryPoints.mockResolvedValue([agra]);
+      const out = await service.search(body('aphids', [['crop', 'wheat']]));
+      expect(ctx(out)['location-status']).toBe('not_requested');
+      expect(ctx(out)['has-location-specific']).toBe('true');
+      expect(chunkTags(out, 'agra')['location-match']).toBe('not_requested');
     });
 
-    it('still fails with the fixed message when the crop-level query fails', async () => {
-      qdrant.queryAdvisoryPoints.mockRejectedValue(new Error('boom'));
+    it('treats the old district name as no place', async () => {
+      qdrant.queryAdvisoryPoints.mockResolvedValue([general]);
       const out = await service.search(body('aphids', [['crop', 'wheat'], ['district', 'Lucknow']]));
-      expect(ctx(out).status).toBe('error');
-      expect(ctx(out).message).toBe('Advisory search failed');
+      expect(ctx(out)['location-status']).toBe('not_requested');
+      expect(qdrant.queryAdvisoryPoints).toHaveBeenCalledWith([0.1, 0.2], { limit: 40, crop: 'Wheat' });
     });
 
-    it('reports no_match when a district was sent and nothing was found at all', async () => {
-      const out = await service.search(body('aphids', [['crop', 'wheat'], ['district', 'Lucknow']]));
+    it('reports no_match when a place was sent and nothing was found', async () => {
+      const out = await service.search(body('aphids', place));
       expect(ctx(out).status).toBe('not_found');
       expect(ctx(out)['location-status']).toBe('no_match');
     });
 
-    it('reports not_requested and runs one query when no district is sent', async () => {
+    it('fails with the fixed message when the query fails', async () => {
+      qdrant.queryAdvisoryPoints.mockRejectedValue(new Error('boom'));
+      const out = await service.search(body('aphids', place));
+      expect(ctx(out).status).toBe('error');
+      expect(ctx(out).message).toBe('Advisory search failed');
+    });
+
+    it('reports not_requested for a chunk indexed before location existed', async () => {
       qdrant.queryAdvisoryPoints.mockResolvedValue([general]);
       const out = await service.search(body('aphids', [['crop', 'wheat']]));
-      expect(qdrant.queryAdvisoryPoints).toHaveBeenCalledTimes(1);
       expect(ctx(out)['location-status']).toBe('not_requested');
+      expect(ctx(out)['has-location-specific']).toBe('false');
     });
   });
 });

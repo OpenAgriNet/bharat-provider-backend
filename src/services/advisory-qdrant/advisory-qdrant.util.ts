@@ -17,7 +17,27 @@ export interface AdvisoryHit {
   /** Days after sowing the advice applies from / to; null when absent or not numeric. */
   start_period: number | null;
   end_period: number | null;
+  /** Where the advisory applies (written by docs-pipeline from the webhook's contentLocationDetails). */
+  location_national: boolean;
+  location_state_codes: number[];
+  /** States the advisory covers in full (no district list). */
+  location_statewide_codes: number[];
+  location_district_codes: number[];
+  location_state_names: string[];
+  location_district_names: string[];
+  /** How this advisory relates to the farmer's place; set after ranking. */
+  location_match?: LocationMatch;
 }
+
+/**
+ * How one advisory relates to the farmer's place:
+ * - `not_requested`: the farmer's place is not known
+ * - `national`: the advisory is not tied to a place (applies everywhere)
+ * - `matched`: it covers the farmer's district, or the farmer's whole state
+ * - `state_partial`: the farmer gave only a state and the advisory covers some districts of it
+ * - `other`: it is meant for other places
+ */
+export type LocationMatch = 'not_requested' | 'national' | 'matched' | 'state_partial' | 'other';
 
 /**
  * Keep only the best-scoring chunk per advisory entry (doc_id + pop_id), sorted by score
@@ -53,6 +73,9 @@ export interface AdvisorySearchParams {
   /** Crop in the form stored by docs-pipeline (for example "Wheat"); empty when not sent. */
   crop: string;
   district: string;
+  /** Farmer's state and district as LGD codes (the caller resolves names to codes); null when not sent. */
+  stateLgdCode: number | null;
+  districtLgdCode: number | null;
   /** Season sent by the caller; only used when ADVISORY_DEFAULT_SEASON is empty. */
   season: string;
   daysAfterSowing: number | null;
@@ -119,6 +142,8 @@ export function parseAdvisoryParams(body: any): AdvisorySearchParams {
     query: String(item?.descriptor?.name || '').trim(),
     crop: '',
     district: '',
+    stateLgdCode: null,
+    districtLgdCode: null,
     season: '',
     daysAfterSowing: null,
     topK: null,
@@ -143,6 +168,14 @@ export function parseAdvisoryParams(body: any): AdvisorySearchParams {
           break;
         case 'district':
           params.district = value;
+          break;
+        case 'state_lgd_code':
+        case 'state-lgd-code':
+          params.stateLgdCode = toInt(value);
+          break;
+        case 'district_lgd_code':
+        case 'district-lgd-code':
+          params.districtLgdCode = toInt(value);
           break;
         case 'season':
           params.season = value;
@@ -204,14 +237,105 @@ export function seasonList(value: string): string[] {
 
 export function rankHits(
   hits: AdvisoryHit[],
-  options: { preferredSeason: string; daysAfterSowing: number | null },
+  options: {
+    preferredSeason: string;
+    daysAfterSowing: number | null;
+    stateLgdCode?: number | null;
+    districtLgdCode?: number | null;
+  },
 ): AdvisoryHit[] {
   const season = options.preferredSeason.trim().toLowerCase();
+  const place = { state: options.stateLgdCode ?? null, district: options.districtLgdCode ?? null };
   const boosted = hits.map((hit) => {
     let adjusted = hit.score;
     if (season && seasonList(hit.season).includes(season)) adjusted += SEASON_BOOST;
     if (daysInRange(hit, options.daysAfterSowing)) adjusted += DAYS_BOOST;
+    const match = classifyLocation(hit, place);
+    if (match === 'matched') adjusted += LOCATION_BOOST_MATCHED;
+    else if (match === 'state_partial') adjusted += LOCATION_BOOST_PARTIAL;
     return { hit, adjusted };
   });
   return boosted.sort((a, b) => b.adjusted - a.adjusted).map((entry) => entry.hit);
+}
+
+// ---------------------------------------------------------------------------
+// Location: matching and ranking (a preference, never a filter)
+// ---------------------------------------------------------------------------
+
+/** Added to the score of an advisory that covers the farmer's district or whole state. */
+export const LOCATION_BOOST_MATCHED = 0.2;
+/** Added when the farmer gave only a state and the advisory covers some districts of it. */
+export const LOCATION_BOOST_PARTIAL = 0.1;
+
+/**
+ * True when the advisory applies everywhere. Chunks indexed before location existed carry no
+ * location fields at all and count as national.
+ */
+export function isNational(hit: AdvisoryHit): boolean {
+  if (hit.location_national) return true;
+  return (
+    hit.location_state_codes.length === 0 &&
+    hit.location_statewide_codes.length === 0 &&
+    hit.location_district_codes.length === 0
+  );
+}
+
+/** True when the advisory is tied to particular states or districts. */
+export function isLocationSpecific(hit: AdvisoryHit): boolean {
+  return !isNational(hit);
+}
+
+/**
+ * Relate one advisory to the farmer's place. District LGD codes are unique across the country, so
+ * a district code matches without a state. A statewide advisory (no district list) matches any
+ * farmer in that state.
+ */
+export function classifyLocation(
+  hit: AdvisoryHit,
+  place: { state: number | null; district: number | null },
+): LocationMatch {
+  if (isNational(hit)) return 'national';
+  if (place.state === null && place.district === null) return 'not_requested';
+  if (place.district !== null && hit.location_district_codes.includes(place.district)) return 'matched';
+  if (place.state !== null && hit.location_statewide_codes.includes(place.state)) return 'matched';
+  if (place.district === null && place.state !== null && hit.location_state_codes.includes(place.state)) {
+    return 'state_partial';
+  }
+  return 'other';
+}
+
+/** Whether the farmer's place was sent in a form we can match on. */
+export function placeRequested(params: { stateLgdCode: number | null; districtLgdCode: number | null }): boolean {
+  return params.stateLgdCode !== null || params.districtLgdCode !== null;
+}
+
+function intList(value: unknown): number[] {
+  const list = Array.isArray(value) ? value : [];
+  return list.map((item) => toInt(item)).filter((item): item is number => item !== null);
+}
+
+function textList(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : [];
+  return list.map((item) => String(item ?? '').trim()).filter((item) => item.length > 0);
+}
+
+/** Location fields of a stored chunk; chunks indexed before location existed read as national. */
+export function locationFromPayload(payload: any): Pick<
+  AdvisoryHit,
+  | 'location_national'
+  | 'location_state_codes'
+  | 'location_statewide_codes'
+  | 'location_district_codes'
+  | 'location_state_names'
+  | 'location_district_names'
+> {
+  const p = payload || {};
+  return {
+    location_national: p.location_national === undefined || p.location_national === null ? true : p.location_national === true,
+    location_state_codes: intList(p.location_state_codes),
+    location_statewide_codes: intList(p.location_statewide_codes),
+    location_district_codes: intList(p.location_district_codes),
+    location_state_names: textList(p.location_state_names),
+    location_district_names: textList(p.location_district_names),
+  };
 }
