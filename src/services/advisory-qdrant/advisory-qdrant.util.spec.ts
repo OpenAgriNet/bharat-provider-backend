@@ -1,7 +1,14 @@
 import {
   AdvisoryHit,
   DAYS_BOOST,
+  LOCATION_BOOST_MATCHED,
+  LOCATION_BOOST_PARTIAL,
   SEASON_BOOST,
+  classifyLocation,
+  isLocationSpecific,
+  isNational,
+  locationFromPayload,
+  placeRequested,
   dedupeByPop,
   formatSource,
   normalizeCrop,
@@ -28,6 +35,12 @@ function hit(overrides: Partial<AdvisoryHit>): AdvisoryHit {
     season: 'Rabi',
     start_period: 105,
     end_period: 120,
+    location_national: true,
+    location_state_codes: [],
+    location_statewide_codes: [],
+    location_district_codes: [],
+    location_state_names: [],
+    location_district_names: [],
     ...overrides,
   };
 }
@@ -144,6 +157,8 @@ describe('parseAdvisoryParams', () => {
       query: 'aphids',
       crop: 'Wheat',
       district: 'Lucknow',
+      stateLgdCode: null,
+      districtLgdCode: null,
       season: 'Kharif',
       daysAfterSowing: 45,
       topK: 3,
@@ -152,7 +167,16 @@ describe('parseAdvisoryParams', () => {
 
   it('works with only the query (existing callers)', () => {
     const p = parseAdvisoryParams({ message: { intent: { item: { descriptor: { name: 'aphids in wheat' } } } } });
-    expect(p).toEqual({ query: 'aphids in wheat', crop: '', district: '', season: '', daysAfterSowing: null, topK: null });
+    expect(p).toEqual({
+      query: 'aphids in wheat',
+      crop: '',
+      district: '',
+      stateLgdCode: null,
+      districtLgdCode: null,
+      season: '',
+      daysAfterSowing: null,
+      topK: null,
+    });
   });
 
   it('ignores non-numeric days and empty values', () => {
@@ -272,5 +296,128 @@ describe('seasonList', () => {
   it('splits a multi-season value and lowercases it', () => {
     expect(seasonList('Rabi,Kharif, Zaid')).toEqual(['rabi', 'kharif', 'zaid']);
     expect(seasonList('')).toEqual([]);
+  });
+});
+
+describe('location: params', () => {
+  it('reads the farmer state and district as LGD codes', () => {
+    const p = parseAdvisoryParams(intent([['state_lgd_code', '9'], ['district_lgd_code', '118']]));
+    expect(p.stateLgdCode).toBe(9);
+    expect(p.districtLgdCode).toBe(118);
+    expect(placeRequested(p)).toBe(true);
+  });
+
+  it('accepts the dashed spelling and ignores non-numeric codes', () => {
+    const p = parseAdvisoryParams(intent([['state-lgd-code', '9'], ['district_lgd_code', 'Agra']]));
+    expect(p.stateLgdCode).toBe(9);
+    expect(p.districtLgdCode).toBeNull();
+  });
+
+  it('reports no place when neither code is sent (the old district name is not a place)', () => {
+    const p = parseAdvisoryParams(intent([['district', 'Lucknow']]));
+    expect(placeRequested(p)).toBe(false);
+  });
+});
+
+describe('location: reading the stored payload', () => {
+  it('reads the fields docs-pipeline writes', () => {
+    const loc = locationFromPayload({
+      location_national: false,
+      location_state_codes: [9],
+      location_statewide_codes: [],
+      location_district_codes: [118, 123],
+      location_state_names: ['Uttar Pradesh'],
+      location_district_names: ['Agra', 'Azamgarh'],
+    });
+    expect(loc.location_national).toBe(false);
+    expect(loc.location_district_codes).toEqual([118, 123]);
+    expect(loc.location_district_names).toEqual(['Agra', 'Azamgarh']);
+  });
+
+  it('reads chunks indexed before location existed as national', () => {
+    const loc = locationFromPayload({ crop: 'Wheat' });
+    expect(loc.location_national).toBe(true);
+    expect(loc.location_state_codes).toEqual([]);
+    expect(isNational(hit(loc))).toBe(true);
+  });
+
+  it('drops values that are not numbers or text', () => {
+    const loc = locationFromPayload({ location_district_codes: [118, 'x', null], location_state_names: ['UP', '', null] });
+    expect(loc.location_district_codes).toEqual([118]);
+    expect(loc.location_state_names).toEqual(['UP']);
+  });
+});
+
+describe('location: classifyLocation', () => {
+  const agra = hit({ location_national: false, location_state_codes: [9], location_district_codes: [118] });
+  const uttarakhand = hit({ location_national: false, location_state_codes: [5], location_statewide_codes: [5] });
+
+  it('treats an advisory with no location as national for every farmer', () => {
+    expect(classifyLocation(hit({}), { state: 9, district: 118 })).toBe('national');
+    expect(classifyLocation(hit({}), { state: null, district: null })).toBe('national');
+  });
+
+  it('treats a record marked national as national even when it also lists a state', () => {
+    const mixed = hit({ location_national: true, location_state_codes: [5] });
+    expect(classifyLocation(mixed, { state: 9, district: 118 })).toBe('national');
+  });
+
+  it('matches a listed district, with or without the state', () => {
+    expect(classifyLocation(agra, { state: 9, district: 118 })).toBe('matched');
+    expect(classifyLocation(agra, { state: null, district: 118 })).toBe('matched');
+  });
+
+  it('matches a statewide advisory for any farmer in that state', () => {
+    expect(classifyLocation(uttarakhand, { state: 5, district: 999 })).toBe('matched');
+    expect(classifyLocation(uttarakhand, { state: 5, district: null })).toBe('matched');
+  });
+
+  it('is a partial match when the farmer gave only a state and the advisory lists districts of it', () => {
+    expect(classifyLocation(agra, { state: 9, district: null })).toBe('state_partial');
+  });
+
+  it('is "other" when the advisory is for different places', () => {
+    expect(classifyLocation(agra, { state: 27, district: 521 })).toBe('other');
+    expect(classifyLocation(agra, { state: 9, district: 123 })).toBe('other');
+    expect(classifyLocation(uttarakhand, { state: 9, district: null })).toBe('other');
+  });
+
+  it('does not rank by place when the farmer place is unknown', () => {
+    expect(classifyLocation(agra, { state: null, district: null })).toBe('not_requested');
+    expect(isLocationSpecific(agra)).toBe(true);
+    expect(isLocationSpecific(hit({}))).toBe(false);
+  });
+});
+
+describe('location: ranking', () => {
+  const agra = hit({ chunk_id: 'agra', pop_id: 1, score: 0.7, location_national: false, location_state_codes: [9], location_district_codes: [118] });
+  const national = hit({ chunk_id: 'nat', pop_id: 2, score: 0.8 });
+  const pune = hit({ chunk_id: 'pune', pop_id: 3, score: 0.75, location_national: false, location_state_codes: [27], location_district_codes: [521] });
+
+  it('moves a matching advisory ahead but never drops the others', () => {
+    const ranked = rankHits([national, pune, agra], {
+      preferredSeason: '',
+      daysAfterSowing: null,
+      stateLgdCode: 9,
+      districtLgdCode: 118,
+    });
+    expect(ranked.map((h) => h.chunk_id)).toEqual(['agra', 'nat', 'pune']);
+    expect(agra.score + LOCATION_BOOST_MATCHED).toBeGreaterThan(national.score);
+  });
+
+  it('gives a smaller boost to a state-only partial match', () => {
+    expect(LOCATION_BOOST_PARTIAL).toBeLessThan(LOCATION_BOOST_MATCHED);
+    const ranked = rankHits([national, agra], {
+      preferredSeason: '',
+      daysAfterSowing: null,
+      stateLgdCode: 9,
+      districtLgdCode: null,
+    });
+    expect(ranked.map((h) => h.chunk_id)).toEqual(['nat', 'agra']);
+  });
+
+  it('leaves the order alone when no place is sent', () => {
+    const ranked = rankHits([agra, national, pune], { preferredSeason: '', daysAfterSowing: null });
+    expect(ranked.map((h) => h.chunk_id)).toEqual(['nat', 'pune', 'agra']);
   });
 });

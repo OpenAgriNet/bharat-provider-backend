@@ -4,10 +4,13 @@ import { QdrantClientService } from '../scheme-qdrant/qdrant.client';
 import { AdvisoryStatus, LocationStatus, buildAdvisoryOnSearch } from './advisory-qdrant.catalog';
 import {
   AdvisoryHit,
+  classifyLocation,
   dedupeByPop,
   daysInRange,
   hasDayRange,
+  isLocationSpecific,
   parseAdvisoryParams,
+  placeRequested,
   rankHits,
   resolvePreferredSeason,
 } from './advisory-qdrant.util';
@@ -36,21 +39,21 @@ export class AdvisoryQdrantService {
     const txn = context.transaction_id || context.message_id || '-';
     const started = Date.now();
     const params = parseAdvisoryParams(body);
-    const { query, crop, district, daysAfterSowing } = params;
+    const { query, crop, district, daysAfterSowing, stateLgdCode, districtLgdCode } = params;
     const topK = this.getTopK(params.topK);
     const preferredSeason = resolvePreferredSeason(params.season);
 
     this.logger.log(
       `[advisory-qdrant] → txn=${txn} query=${JSON.stringify(query)} crop=${JSON.stringify(crop)} district=${JSON.stringify(
         district,
-      )} days=${daysAfterSowing ?? '-'} season=${JSON.stringify(preferredSeason)} topK=${topK}`,
+      )} stateLgd=${stateLgdCode ?? '-'} districtLgd=${districtLgdCode ?? '-'} days=${daysAfterSowing ?? '-'} season=${JSON.stringify(preferredSeason)} topK=${topK}`,
     );
 
     const respond = (
       status: AdvisoryStatus,
       results: AdvisoryHit[] = [],
       message = '',
-      extra: { locationStatus?: LocationStatus; daysMatched?: boolean } = {},
+      extra: { locationStatus?: LocationStatus; daysMatched?: boolean; hasLocationSpecific?: boolean } = {},
     ) =>
       buildAdvisoryOnSearch({
         context,
@@ -61,6 +64,7 @@ export class AdvisoryQdrantService {
         locationStatus: extra.locationStatus,
         hasDayRange: results.some(hasDayRange),
         daysMatched: extra.daysMatched,
+        hasLocationSpecific: extra.hasLocationSpecific,
       });
 
     if (!query) {
@@ -78,12 +82,24 @@ export class AdvisoryQdrantService {
 
     try {
       const vector = await this.embeddingService.embedQuery(query);
-      const { hits, locationStatus } = await this.searchWithLocationFallback(vector, crop, district);
+      const hits = await this.qdrantClient.queryAdvisoryPoints(vector, {
+        limit: FETCH_LIMIT,
+        crop: crop || undefined,
+      });
 
-      const ranked = rankHits(dedupeByPop(hits), { preferredSeason, daysAfterSowing }).slice(0, topK);
+      // Season, days and the farmer's place only reorder the hits; nothing is filtered out.
+      const place = { state: stateLgdCode, district: districtLgdCode };
+      const ranked = rankHits(dedupeByPop(hits), {
+        preferredSeason,
+        daysAfterSowing,
+        stateLgdCode,
+        districtLgdCode,
+      })
+        .slice(0, topK)
+        .map((hit) => ({ ...hit, location_match: classifyLocation(hit, place) }));
       const status: AdvisoryStatus = ranked.length ? 'success' : 'not_found';
-      const finalLocationStatus: LocationStatus =
-        district && !ranked.length ? 'no_match' : locationStatus;
+      const finalLocationStatus = this.locationStatusOf(ranked, placeRequested(params));
+      const hasLocationSpecific = ranked.some(isLocationSpecific);
       const daysMatched = ranked.some((hit) => daysInRange(hit, daysAfterSowing));
       this.logger.log(
         `[advisory-qdrant] ← txn=${txn} hits=${hits.length} returned=${ranked.length} status=${status} location=${finalLocationStatus} daysMatched=${daysMatched} elapsedMs=${
@@ -93,6 +109,7 @@ export class AdvisoryQdrantService {
       return respond(status, ranked, ranked.length ? '' : 'No advisory found for this question', {
         locationStatus: finalLocationStatus,
         daysMatched,
+        hasLocationSpecific,
       });
     } catch (err: any) {
       this.logger.error(
@@ -105,32 +122,16 @@ export class AdvisoryQdrantService {
   }
 
   /**
-   * Without a district: one crop-level query. With a district: the district query and the
-   * crop-level query run in parallel on the same embedding. District results win when there
-   * are any; otherwise the crop-level results are used (`location_not_applied`). A failing
-   * district query counts as "no location match" and never fails the request.
+   * Summary of how the returned advisories relate to the farmer's place. Only meaningful when a
+   * place was sent. The best relation wins: matched, then partial, then "not tied to a place".
    */
-  private async searchWithLocationFallback(
-    vector: number[],
-    crop: string,
-    district: string,
-  ): Promise<{ hits: AdvisoryHit[]; locationStatus: LocationStatus }> {
-    if (!district) {
-      const hits = await this.qdrantClient.queryAdvisoryPoints(vector, { limit: FETCH_LIMIT, crop: crop || undefined });
-      return { hits, locationStatus: 'not_requested' };
-    }
-
-    const [local, general] = await Promise.all([
-      this.qdrantClient
-        .queryAdvisoryPoints(vector, { limit: FETCH_LIMIT, crop: crop || undefined, district })
-        .catch((err: any) => {
-          this.logger.warn(`[advisory-qdrant] district query failed, using crop-level results: ${err?.message || err}`);
-          return [] as AdvisoryHit[];
-        }),
-      this.qdrantClient.queryAdvisoryPoints(vector, { limit: FETCH_LIMIT, crop: crop || undefined }),
-    ]);
-    if (local.length) return { hits: local, locationStatus: 'location_matched' };
-    return { hits: general, locationStatus: 'location_not_applied' };
+  private locationStatusOf(ranked: AdvisoryHit[], requested: boolean): LocationStatus {
+    if (!requested) return 'not_requested';
+    if (!ranked.length) return 'no_match';
+    if (ranked.some((hit) => hit.location_match === 'matched')) return 'location_matched';
+    if (ranked.some((hit) => hit.location_match === 'state_partial')) return 'location_partial';
+    if (ranked.some((hit) => hit.location_match === 'national')) return 'location_not_applied';
+    return 'other_only';
   }
 
   /** top_k from the request tag when given, else ADVISORY_QDRANT_TOP_K, else 5; clamped to 1..20. */
