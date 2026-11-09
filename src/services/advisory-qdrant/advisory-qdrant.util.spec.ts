@@ -32,6 +32,7 @@ function hit(overrides: Partial<AdvisoryHit>): AdvisoryHit {
     crop: 'Sorghum',
     institute: 'ICAR–DKMA',
     creator: 'jak',
+    origin: 'webhook',
     season: 'Rabi',
     start_period: 105,
     end_period: 120,
