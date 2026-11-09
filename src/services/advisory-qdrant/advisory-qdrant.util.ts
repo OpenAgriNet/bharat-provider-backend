@@ -12,6 +12,8 @@ export interface AdvisoryHit {
   crop: string;
   institute: string;
   creator: string;
+  /** Which system wrote the chunk: `webhook` (Kisan Sarathi) or `docs-pipeline` (a PDF uploaded in its UI). */
+  origin: string;
   /** Season of the advisory entry (Rabi, Kharif, Other); empty when unknown. */
   season: string;
   /** Days after sowing the advice applies from / to; null when absent or not numeric. */
