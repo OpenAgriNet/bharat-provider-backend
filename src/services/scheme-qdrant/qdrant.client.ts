@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { DEFAULT_COLLECTION } from './scheme-registry';
 import { SchemeSearchHit, classifyChunkSection } from './scheme-query.util';
-import { AdvisoryHit } from '../advisory-qdrant/advisory-qdrant.util';
+import { AdvisoryHit, locationFromPayload } from '../advisory-qdrant/advisory-qdrant.util';
 
 /**
  * Qdrant REST client for scheme document vector search only.
@@ -138,10 +138,12 @@ export class QdrantClientService {
   /**
    * Dense vector search over advisory chunks only (type=advisory).
    * Unlike querySchemePoints there is no type=scheme or scheme_code filter.
+   * Optional `crop` (stored form, for example "Wheat") adds an exact-match filter.
+   * Season, days after sowing and the farmer's place are not filters; they are applied as a soft ranking afterwards.
    */
   async queryAdvisoryPoints(
     vector: number[],
-    options: { limit?: number; collectionName?: string } = {},
+    options: { limit?: number; collectionName?: string; crop?: string } = {},
   ): Promise<AdvisoryHit[]> {
     const baseUrl = this.getUrl();
     if (!baseUrl) {
@@ -158,12 +160,19 @@ export class QdrantClientService {
       headers['api-key'] = apiKey;
     }
 
+    const must: Array<{ key: string; match: { value: string } }> = [
+      { key: 'type', match: { value: 'advisory' } },
+    ];
+    if (options.crop) {
+      must.push({ key: 'crop', match: { value: options.crop } });
+    }
+
     const started = Date.now();
     const response = await axios.post(
       url,
       {
         query: vector,
-        filter: { must: [{ key: 'type', match: { value: 'advisory' } }] },
+        filter: { must },
         limit,
         with_payload: true,
       },
@@ -208,7 +217,17 @@ export class QdrantClientService {
       crop: String(payload.crop ?? ''),
       institute: String(payload.institute ?? ''),
       creator: String(payload.creator ?? ''),
+      season: String(payload.season ?? ''),
+      start_period: this.periodFrom(payload.start_period),
+      end_period: this.periodFrom(payload.end_period),
+      ...locationFromPayload(payload),
     };
+  }
+
+  /** docs-pipeline stores day ranges as text ("20", "-30"); null when absent or not an integer. */
+  private periodFrom(value: unknown): number | null {
+    const text = String(value ?? '').trim();
+    return /^-?\d+$/.test(text) ? parseInt(text, 10) : null;
   }
 
   private hitToResult(hit: any): SchemeSearchHit {

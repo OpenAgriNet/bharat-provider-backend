@@ -22,6 +22,12 @@ export {
   resolveExternalServiceName,
 } from './service-name.resolver';
 export {
+  classifyRequestError,
+  trackExternalApiCall,
+  type ExternalApiCall,
+  type ExternalApiOutcome,
+} from './ext-api-call.tracker';
+export {
   emitOeStart,
   emitOeItemResponse,
   emitOeEnd,

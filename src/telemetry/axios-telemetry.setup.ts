@@ -11,6 +11,17 @@ import {
 import { resolveExternalServiceName } from './service-name.resolver';
 import { sanitisePayload } from './telemetry-sanitiser';
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /**
+     * Skip the automatic EXT_API event for this request. Set when the caller
+     * records the call itself via trackExternalApiCall (outcome known only
+     * after decrypting the response).
+     */
+    skipTelemetry?: boolean;
+  }
+}
+
 type TimedAxiosConfig = InternalAxiosRequestConfig & {
   __telemetryStart?: number;
 };
@@ -29,7 +40,9 @@ function logOutboundCall(
   data: unknown,
   error?: string,
 ): void {
-  if (!config || shouldSkipTelemetry(config.url)) return;
+  if (!config || config.skipTelemetry || shouldSkipTelemetry(config.url)) {
+    return;
+  }
 
   const start = config.__telemetryStart ?? Date.now();
   const latencyMs = Date.now() - start;

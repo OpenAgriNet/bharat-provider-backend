@@ -1,14 +1,13 @@
 import { ConfigService } from "@nestjs/config";
 import { Logger } from "@nestjs/common";
+import { Test } from "@nestjs/testing";
 import axios from "axios";
 import { constants, createCipheriv, generateKeyPairSync, publicEncrypt, randomBytes } from "crypto";
 import * as fs from "fs";
-import { DatabaseService } from "../weatherforecast/database.service";
 import { AgristackService } from "./agristack.service";
 
 jest.mock("axios");
 jest.mock("fs", () => ({ ...jest.requireActual("fs"), readFileSync: jest.fn() }));
-jest.mock("../weatherforecast/database.service", () => ({ DatabaseService: jest.fn() }));
 
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 interface SeekPayload {
@@ -60,7 +59,6 @@ function request(category = "a", state = "22") {
 
 describe("AgristackService synchronous gateway", () => {
   let service: AgristackService;
-  let audit: jest.Mock;
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -68,14 +66,22 @@ describe("AgristackService synchronous gateway", () => {
       jest.spyOn(Logger.prototype, method).mockImplementation(() => undefined);
     }
     jest.mocked(fs.readFileSync).mockReturnValue(keys.privateKey.export({ type: "pkcs8", format: "pem" }));
-    const database = new DatabaseService();
-    audit = jest.fn().mockResolvedValue(undefined);
-    database.insertAgristackApiAudit = audit;
-    service = new AgristackService(new ConfigService({ AGRISTACK_SENDER_ID: "sender" }), database);
+    service = new AgristackService(new ConfigService({ AGRISTACK_SENDER_ID: "sender" }));
     mockedAxios.post.mockResolvedValueOnce({ data: { access_token: "test-token", expires_in: 300 } });
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it("resolves without a database provider", async () => {
+    const module = await Test.createTestingModule({
+      providers: [AgristackService, { provide: ConfigService, useValue: new ConfigService() }],
+    }).compile();
+    try {
+      expect(module.get(AgristackService)).toBeInstanceOf(AgristackService);
+    } finally {
+      await module.close();
+    }
+  });
 
   it.each(["a", "b", "c"])("sends state and exact query fields, then decrypts category %s", async (category) => {
     mockedAxios.post.mockResolvedValueOnce({ status: 200, data: encryptedResponse() });
@@ -93,7 +99,6 @@ describe("AgristackService synchronous gateway", () => {
     expect(item.id).toBe("F1");
     expect(item.tags.map((tag: { descriptor: { code: string } }) => tag.descriptor.code))
       .toEqual(["farmer-data", "land-data", "crop-survey-data", "land-ownership-data"]);
-    expect(audit).toHaveBeenCalledWith(expect.objectContaining({ farmer_id: "F1", success: true }));
   });
 
   it.each(["", "abc", "22\r\nbad", "0", "123"])("rejects invalid state %j before HTTP", async (state) => {
@@ -109,7 +114,6 @@ describe("AgristackService synchronous gateway", () => {
       mockedAxios.post.mockResolvedValueOnce({ status: 200, data: response });
       const result = await service.search(request());
       expect(result.message.catalog.providers[0].items[0].id).toBe("error");
-      expect(audit).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
     },
   );
 
@@ -203,8 +207,7 @@ describe("AgristackService synchronous gateway", () => {
     expect((await service.search(request(category))).message.catalog.providers[0].items[0].id).toBe("error");
   });
 
-  it("reuses a valid access token and tolerates audit storage failure", async () => {
-    audit.mockRejectedValue(new Error("Audit database unavailable"));
+  it("reuses a valid access token", async () => {
     mockedAxios.post.mockResolvedValue({ status: 200, data: encryptedResponse() });
     await service.search(request());
     await service.search(request());

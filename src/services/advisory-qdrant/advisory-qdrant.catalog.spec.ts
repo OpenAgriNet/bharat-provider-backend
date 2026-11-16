@@ -12,6 +12,15 @@ const HIT: AdvisoryHit = {
   crop: 'Sorghum',
   institute: 'ICAR–DKMA',
   creator: 'jak',
+  season: 'Rabi',
+  start_period: 105,
+  end_period: 120,
+  location_national: true,
+  location_state_codes: [],
+  location_statewide_codes: [],
+  location_district_codes: [],
+  location_state_names: [],
+  location_district_names: [],
 };
 
 function tagMap(item: any): Record<string, string> {
@@ -39,7 +48,10 @@ describe('buildAdvisoryOnSearch', () => {
     expect(item.id).toBe('chunk-1');
     const tags = tagMap(item);
     expect(Object.keys(tags).sort()).toEqual(
-      ['chunk_id', 'crop', 'doc_id', 'score', 'section', 'source', 'text', 'title'].sort(),
+      [
+        'chunk_id', 'crop', 'doc_id', 'score', 'section', 'source', 'text', 'title',
+        'location-match', 'location-national', 'location-states', 'location-districts',
+      ].sort(),
     );
     expect(tags.title).toBe('Sorghum- Harvesting Management');
     expect(tags.crop).toBe('Sorghum');
@@ -77,6 +89,10 @@ describe('buildAdvisoryOnSearch', () => {
       status: 'success',
       message: '',
       'hit-count': '1',
+      'location-status': 'not_requested',
+      'has-day-range': 'false',
+      'days-matched': 'false',
+      'has-location-specific': 'false',
       'search-backend': 'qdrant',
     });
   });
@@ -97,5 +113,63 @@ describe('buildAdvisoryOnSearch', () => {
       context: CONTEXT, query: 'q', results: [{ ...HIT, chunk_id: '' }], status: 'success',
     });
     expect(out.message.catalog.providers[0].items[0].id).toBe('row-1:0');
+  });
+
+  it('reports location status, day range and days-matched in the search context', () => {
+    const out = buildAdvisoryOnSearch({
+      context: CONTEXT,
+      query: 'q',
+      results: [HIT],
+      status: 'success',
+      locationStatus: 'location_not_applied',
+      hasDayRange: true,
+      daysMatched: true,
+    });
+    const ctx = contextMap(out.message.catalog);
+    expect(ctx['location-status']).toBe('location_not_applied');
+    expect(ctx['has-day-range']).toBe('true');
+    expect(ctx['days-matched']).toBe('true');
+  });
+
+  it('defaults to not_requested and false flags for existing callers', () => {
+    const ctx = contextMap(buildAdvisoryOnSearch({ context: CONTEXT, query: 'q', results: [], status: 'not_found' }).message.catalog);
+    expect(ctx['location-status']).toBe('not_requested');
+    expect(ctx['has-day-range']).toBe('false');
+    expect(ctx['days-matched']).toBe('false');
+  });
+
+  it('adds location tags to every chunk and has-location-specific to the context', () => {
+    const agra: AdvisoryHit = {
+      ...HIT,
+      location_national: false,
+      location_state_codes: [9],
+      location_district_codes: [118],
+      location_state_names: ['Uttar Pradesh'],
+      location_district_names: ['Agra', 'Azamgarh'],
+      location_match: 'matched',
+    };
+    const out = buildAdvisoryOnSearch({
+      context: CONTEXT,
+      query: 'aphids',
+      results: [agra, HIT],
+      status: 'success',
+      locationStatus: 'location_matched',
+      hasLocationSpecific: true,
+    });
+    const items = out.message.catalog.providers[0].items;
+    expect(tagMap(items[0])['location-match']).toBe('matched');
+    expect(tagMap(items[0])['location-national']).toBe('false');
+    expect(tagMap(items[0])['location-states']).toBe('Uttar Pradesh');
+    expect(tagMap(items[0])['location-districts']).toBe('Agra, Azamgarh');
+    expect(tagMap(items[1])['location-match']).toBe('not_requested');
+    expect(tagMap(items[1])['location-national']).toBe('true');
+    const context = contextMap(out.message.catalog);
+    expect(context['has-location-specific']).toBe('true');
+    expect(context['location-status']).toBe('location_matched');
+  });
+
+  it('defaults has-location-specific to false', () => {
+    const out = buildAdvisoryOnSearch({ context: CONTEXT, query: 'q', results: [HIT], status: 'success' });
+    expect(contextMap(out.message.catalog)['has-location-specific']).toBe('false');
   });
 });

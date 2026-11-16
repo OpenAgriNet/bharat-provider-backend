@@ -1,7 +1,12 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios from "axios";
 import { buildAifResponse as buildResponse } from "../aif/aif-response";
+import { KhcMasterService, normalizeName } from "./khc-master.service";
+import { REFERENCES } from "./khc-references";
+import { KhcLookup, LookupError } from "./khc-lookup";
+
+export { REFERENCES };
 
 type Values = Record<string, unknown>;
 type Action = "on_init" | "on_status";
@@ -28,26 +33,6 @@ class KhcError extends Error {
   }
 }
 
-const REFERENCES: Record<
-  string,
-  { parent?: string; id: string; name: string }
-> = {
-  states: { id: "stateid", name: "statename" },
-  districts: { parent: "stateId", id: "districtid", name: "districtname" },
-  "sub-districts": {
-    parent: "districtId",
-    id: "subdistrictid",
-    name: "subdistrictname",
-  },
-  villages: { parent: "subDistrictId", id: "villageid", name: "villagename" },
-  schemes: { parent: "stateId", id: "scheme", name: "schemename" },
-  categories: { parent: "scheme", id: "problemcategory", name: "categoryname" },
-  "sub-categories": {
-    parent: "problemCategory",
-    id: "problemsubcategory",
-    name: "subcategoryname",
-  },
-};
 
 function record(value: unknown): value is Values {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -84,6 +69,23 @@ function positiveId(value: unknown, field: string): number {
   return number;
 }
 
+function optionalText(input: Values, field: string, maxLength: number): string | undefined {
+  return input[field] === undefined || input[field] === ""
+    ? undefined
+    : text(input, field, maxLength);
+}
+
+function optionalId(value: unknown, field: string): number | undefined {
+  return value === undefined || value === "" ? undefined : positiveId(value, field);
+}
+
+const listOf = (result: Values) =>
+  Object.entries(result).map(([code, value]) => ({
+    code,
+    name: code,
+    value: JSON.stringify(value),
+  }));
+
 @Injectable()
 export class KhcService {
   private readonly logger = new Logger(KhcService.name);
@@ -95,11 +97,24 @@ export class KhcService {
       expiresAt: number;
       verified: boolean;
       isRegistered?: boolean;
+      wrongAttempts: number;
     }
   >();
+  // ponytail: per-instance send history; share it through Redis before running several replicas.
+  private readonly otpSends = new Map<string, number[]>();
   private readonly verificationWindowMs = 5 * 60 * 1000;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly master?: KhcMasterService
+  ) {
+    this.lookup = new KhcLookup({
+      listAll: (kind, parentId) => this.listAll(kind, parentId),
+      master,
+    });
+  }
+
+  readonly lookup: KhcLookup;
 
   private async request(
     method: "GET" | "POST",
@@ -107,6 +122,8 @@ export class KhcService {
     data?: Values,
     params?: Values
   ): Promise<unknown> {
+    const sendsStatusOtp = path === "/v1/state/grievances/check-status";
+    const verifiesStatusOtp = path === "/v1/state/grievances/verify-otp";
     const baseUrl = this.config
       .get<string>("KHC_BASE_URL")
       ?.trim()
@@ -148,7 +165,8 @@ export class KhcService {
         },
         timeout: 20000,
         maxRedirects: 0,
-        ...(method === "GET" ? { params } : { data }),
+        ...(params !== undefined ? { params } : {}),
+        ...(data !== undefined ? { data } : {}),
       });
       payload = response.data;
     } catch (error: unknown) {
@@ -158,9 +176,56 @@ export class KhcService {
       this.logger.error(
         `[KHC] ${method} failed http_status=${status ?? "unavailable"}`
       );
-      if (status === 404 && path === "/v1/state/grievances/status") {
+      if (sendsStatusOtp || verifiesStatusOtp) {
+        const errorBody: unknown = axios.isAxiosError(error) ? error.response?.data : undefined;
+        if (status === 401) {
+          if (sendsStatusOtp || (record(errorBody) && errorBody.status === "ERROR")) {
+            throw new KhcError(
+              "KHC authentication failed. Please contact support.",
+              "configuration_error"
+            );
+          }
+          throw new KhcError(
+            "Invalid or expired OTP. Check the OTP and try again. If it expired or was already used, request a new OTP for this grievance.",
+            "invalid_otp"
+          );
+        }
+        if (status === 400) {
+          const message = record(errorBody) && typeof errorBody.message === "string"
+            ? errorBody.message.trim().toLowerCase()
+            : "";
+          if (message === "grievanceno is required") {
+            throw new KhcError(
+              "KHC says the grievance ID is missing. Please check the ID in your SMS.",
+              "invalid_request"
+            );
+          }
+          if (verifiesStatusOtp && message === "otp is required") {
+            throw new KhcError(
+              "KHC says the OTP is missing. Please share the 6-digit OTP again.",
+              "invalid_request"
+            );
+          }
+          throw new KhcError(
+            sendsStatusOtp
+              ? "KHC rejected the grievance ID. Please check the full ID in your SMS."
+              : "KHC rejected the status request but did not identify which detail is invalid. Please try again later.",
+            "invalid_request"
+          );
+        }
+        if (status === 422 && sendsStatusOtp) {
+          throw new KhcError(
+            "No valid mobile number is registered for this grievance. Please contact KHC to update it.",
+            "invalid_mobile"
+          );
+        }
+        if (status === 502 && sendsStatusOtp) {
+          throw new KhcError("KHC could not send the OTP. Please request it again later.");
+        }
+      }
+      if (status === 404 && (sendsStatusOtp || verifiesStatusOtp)) {
         throw new KhcError(
-          "Grievance not found. Please check the grievance number.",
+          "Grievance not found. Please check the grievance ID in the SMS on your registered mobile number.",
           "not_found"
         );
       }
@@ -191,7 +256,8 @@ export class KhcService {
       !record(payload) ||
       typeof payload.status !== "string" ||
       !/^20[01](?:\s|$)/.test(payload.status) ||
-      !("data" in payload)
+      (!sendsStatusOtp && !("data" in payload)) ||
+      (sendsStatusOtp && (typeof payload.message !== "string" || !payload.message.trim()))
     ) {
       this.logger.error(
         `[KHC] ${method} returned an invalid or unsuccessful response`
@@ -210,26 +276,29 @@ export class KhcService {
 
   private grievanceResult(
     result: unknown,
-    method: "GET" | "POST",
+    operation: "status" | "create",
     grievanceNo?: string
   ): Values {
     if (
       !record(result) ||
       typeof result.grievanceNo !== "string" ||
       !result.grievanceNo.trim() ||
-      (method === "GET" &&
+      (operation === "status" &&
         (result.grievanceNo !== grievanceNo ||
           typeof result.currentStatus !== "string" ||
-          !result.currentStatus.trim()))
+          !result.currentStatus.trim() ||
+          (result.address != null && !record(result.address)) ||
+          (result.escalationHistory != null &&
+            (!Array.isArray(result.escalationHistory) || !result.escalationHistory.every(record)))))
     ) {
       this.logger.error(
-        `[KHC] ${method} response is missing grievance details`
+        `[KHC] ${operation} response is missing grievance details`
       );
       throw new KhcError(
-        method === "POST"
+        operation === "create"
           ? "KHC grievance submission was not confirmed. Do not submit again automatically; verify with KHC first."
           : "KHC returned incomplete grievance details.",
-        method === "POST" ? "submission_unconfirmed" : "upstream_error"
+        operation === "create" ? "submission_unconfirmed" : "upstream_error"
       );
     }
     return result;
@@ -245,6 +314,33 @@ export class KhcService {
     return value;
   }
 
+  private otpLimit(name: string, fallback: number): number {
+    const value = Number(this.config.get<string>(name));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  /** Resend timer and hourly cap per registration mobile or status grievance. */
+  private checkOtpSendLimits(key: string): void {
+    const now = Date.now();
+    const hour = 60 * 60 * 1000;
+    const sends = (this.otpSends.get(key) ?? []).filter((at) => now - at < hour);
+    this.otpSends.set(key, sends);
+    const waitMs =
+      sends.length && this.otpLimit("KHC_OTP_RESEND_SECONDS", 30) * 1000 - (now - sends[sends.length - 1]);
+    if (waitMs > 0) {
+      throw new KhcError(
+        `Please wait ${Math.ceil(waitMs / 1000)} seconds before asking for a new OTP.`,
+        "rate_limited"
+      );
+    }
+    if (sends.length >= this.otpLimit("KHC_OTP_MAX_SENDS_PER_HOUR", 3)) {
+      throw new KhcError(
+        "Too many OTP requests for this number. Please try again after an hour.",
+        "rate_limited"
+      );
+    }
+  }
+
   async sendOtp(transactionId: string, value: unknown): Promise<void> {
     const mobile = this.mobile(value);
     if (!transactionId)
@@ -252,14 +348,17 @@ export class KhcService {
         "A conversation transaction ID is required.",
         "invalid_request"
       );
+    this.checkOtpSendLimits(mobile);
     this.sessions.delete(transactionId);
     for (const [key, session] of this.sessions) {
       if (Date.now() >= session.expiresAt) this.sessions.delete(key);
     }
     await this.request("POST", "/auth/send-otp", { mobile });
+    this.otpSends.set(mobile, [...(this.otpSends.get(mobile) ?? []), Date.now()]);
     this.sessions.set(transactionId, {
       mobile,
       verified: false,
+      wrongAttempts: 0,
       expiresAt: Date.now() + this.verificationWindowMs,
     });
   }
@@ -292,11 +391,33 @@ export class KhcService {
     if (typeof otp !== "string" || !/^[0-9]{6}$/.test(otp)) {
       throw new KhcError("A valid 6-digit OTP is required.", "invalid_request");
     }
+    const maxAttempts = this.otpLimit("KHC_OTP_MAX_ATTEMPTS", 5);
+    if (session.wrongAttempts >= maxAttempts) {
+      throw new KhcError(
+        "Too many wrong OTP tries. Please ask for a new OTP.",
+        "rate_limited"
+      );
+    }
     session.verified = false;
-    const result = await this.request("POST", "/auth/verify-otp", {
-      mobile,
-      otp,
-    });
+    let result: unknown;
+    try {
+      result = await this.request("POST", "/auth/verify-otp", {
+        mobile,
+        otp,
+      });
+    } catch (error) {
+      if (error instanceof KhcError && error.code === "invalid_otp") {
+        session.wrongAttempts += 1;
+        const left = maxAttempts - session.wrongAttempts;
+        throw new KhcError(
+          left > 0
+            ? `The OTP is not correct. You have ${left} ${left === 1 ? "try" : "tries"} left.`
+            : "Too many wrong OTP tries. Please ask for a new OTP.",
+          left > 0 ? "invalid_otp" : "rate_limited"
+        );
+      }
+      throw error;
+    }
     if (
       !record(result) ||
       typeof result.isRegistered !== "boolean" ||
@@ -316,27 +437,23 @@ export class KhcService {
       );
     }
     session.verified = true;
+    session.wrongAttempts = 0;
     session.isRegistered = result.isRegistered;
     session.expiresAt = Date.now() + this.verificationWindowMs;
     return result.isRegistered;
   }
 
-  async getReference(
-    kind: string,
-    parentId?: unknown,
-    name = "",
-    page: unknown = 1
-  ): Promise<Values> {
+  /** Full list from the KHC API for one reference kind (no cache). */
+  async fetchReferenceRows(kind: string, parentId?: unknown): Promise<Values[]> {
     const reference = REFERENCES[kind];
     if (!Object.prototype.hasOwnProperty.call(REFERENCES, kind)) {
       throw new KhcError("Unknown KHC reference list.", "invalid_request");
     }
     const params: Values = reference.parent
       ? {
-          [reference.parent]: positiveId(parentId, reference.parent),
-        }
+        [reference.parent]: positiveId(parentId, reference.parent),
+      }
       : {};
-    const pageNumber = positiveId(page, "page");
     const data = await this.request(
       "GET",
       `/v1/state/reference/${kind}`,
@@ -355,13 +472,66 @@ export class KhcService {
     ) {
       throw new KhcError("KHC returned an invalid reference list.");
     }
-    const normalizeName = (value: string) =>
-      value.toLocaleLowerCase().replace(/\s+/g, "");
+    return data as Values[];
+  }
+
+  /** A whole reference list: DB first, then the KHC API (saved), then stale DB if the API is down. */
+  async listAll(kind: string, parentId?: number): Promise<Values[]> {
+    const cached = await this.master?.readAll(kind, parentId ?? 0);
+    if (cached) return cached;
+    try {
+      const rows = await this.fetchReferenceRows(kind, parentId);
+      await this.master?.store(
+        kind,
+        parentId ?? 0,
+        REFERENCES[kind].id,
+        REFERENCES[kind].name,
+        rows
+      );
+      return rows;
+    } catch (error) {
+      const stale = await this.master?.readAll(kind, parentId ?? 0, true);
+      if (stale) return stale;
+      throw error;
+    }
+  }
+
+  async getReference(
+    kind: string,
+    parentId?: unknown,
+    name = "",
+    page: unknown = 1
+  ): Promise<Values> {
+    const reference = REFERENCES[kind];
+    if (!Object.prototype.hasOwnProperty.call(REFERENCES, kind)) {
+      throw new KhcError("Unknown KHC reference list.", "invalid_request");
+    }
+    const parent = reference.parent
+      ? positiveId(parentId, reference.parent)
+      : undefined;
+    const pageNumber = positiveId(page, "page");
+
+    // DB first. A miss, a stale list, or a name the cache does not know all go to the API.
+    const cached = await this.master?.read(kind, parent ?? 0, name, pageNumber);
+    if (cached && cached.total > 0) return { ...cached };
+
+    let data: Values[];
+    try {
+      data = await this.fetchReferenceRows(kind, parent);
+    } catch (error) {
+      const fallback =
+        cached ?? (await this.master?.read(kind, parent ?? 0, name, pageNumber, true));
+      if (fallback) {
+        this.logger.warn(`KHC reference ${kind} served from cache after API failure`);
+        return { ...fallback };
+      }
+      throw error;
+    }
+    await this.master?.store(kind, parent ?? 0, reference.id, reference.name, data);
+
     const needle = normalizeName(name);
     const matches = data.filter(
-      (row) =>
-        !needle ||
-        normalizeName(String(row[reference.name])).includes(needle)
+      (row) => !needle || normalizeName(String(row[reference.name])).includes(needle)
     );
     return {
       options: matches.slice((pageNumber - 1) * 50, pageNumber * 50),
@@ -370,21 +540,47 @@ export class KhcService {
     };
   }
 
-  async getStatus(grievanceNo: string): Promise<Values> {
+  private async lookupOrFail<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof LookupError) {
+        throw new KhcError(error.message, "invalid_request");
+      }
+      throw error;
+    }
+  }
+
+  private grievanceNumber(value: unknown): string {
+    const number = typeof value === "string" ? value.trim() : "";
     if (
-      typeof grievanceNo !== "string" ||
-      !/^[A-Za-z0-9][A-Za-z0-9/-]{0,99}$/.test(grievanceNo)
+      number.length > 100 ||
+      !/^[A-Za-z]{2}\/[0-9]+\/0*[1-9][0-9]*$/.test(number)
     ) {
       throw new KhcError(
-        "Please provide a valid KHC grievance number.",
+        "Please provide the full KHC grievance number from your SMS: two letters/numeric middle section/positive sequence, for example BR/240926/1 (example only).",
         "invalid_request"
       );
     }
+    return number.toUpperCase();
+  }
+
+  async sendStatusOtp(value: unknown): Promise<void> {
+    const grievanceNo = this.grievanceNumber(value);
+    const key = `status:${grievanceNo}`;
+    this.checkOtpSendLimits(key);
+    await this.request("POST", "/v1/state/grievances/check-status", undefined, { grievanceNo });
+    this.otpSends.set(key, [...(this.otpSends.get(key) ?? []), Date.now()]);
+  }
+
+  async getStatus(value: unknown, otp: unknown): Promise<Values> {
+    const grievanceNo = this.grievanceNumber(value);
+    if (typeof otp !== "string" || !/^[0-9]{6}$/.test(otp)) {
+      throw new KhcError("A valid 6-digit OTP is required.", "invalid_request");
+    }
     return this.grievanceResult(
-      await this.request("GET", "/v1/state/grievances/status", undefined, {
-        grievanceNo,
-      }),
-      "GET",
+      await this.request("POST", "/v1/state/grievances/verify-otp", { grievanceNo, otp }),
+      "status",
       grievanceNo
     );
   }
@@ -444,7 +640,7 @@ export class KhcService {
     }
     return this.grievanceResult(
       await this.request("POST", "/v1/state/grievances", data),
-      "POST"
+      "create"
     );
   }
 
@@ -493,6 +689,41 @@ export class KhcService {
             })),
           });
         }
+        if (values.request_type === "find_location") {
+          const result = await this.lookupOrFail(() =>
+            this.lookup.findLocation({
+              name: text(values, "name", 200),
+              stateId: optionalId(values.state_id, "state_id"),
+              stateName: optionalText(values, "state_name", 100),
+              districtId: optionalId(values.district_id, "district_id"),
+              districtName: optionalText(values, "district_name", 100),
+              subDistrictName: optionalText(values, "sub_district_name", 100),
+            })
+          );
+          return buildResponse(body, action, {
+            code: "khc_location",
+            name: "KHC location",
+            short_desc: "Matching places with their state, district and sub-district.",
+            list: listOf(result),
+          });
+        }
+        if (values.request_type === "grievance_tree") {
+          const result = await this.lookupOrFail(() =>
+            this.lookup.grievanceTree({
+              stateId: optionalId(values.state_id, "state_id"),
+              stateName: optionalText(values, "state_name", 100),
+              scheme: optionalText(values, "scheme_name", 100),
+              concern: optionalText(values, "concern", 500),
+              category: optionalText(values, "category_name", 100),
+            })
+          );
+          return buildResponse(body, action, {
+            code: "khc_grievance_tree",
+            name: "KHC grievance options",
+            short_desc: "Schemes, categories and sub-categories for the state.",
+            list: listOf(result),
+          });
+        }
         if (values.request_type === "get_otp") {
           await this.sendOtp(transactionId, values.farmerMobileNumber);
           return buildResponse(body, action, {
@@ -531,7 +762,18 @@ export class KhcService {
         }
         result = await this.createGrievance(values, transactionId);
       } else {
-        result = await this.getStatus(text(values, "grievanceNo", 100));
+        if (values.request_type === "get_status_otp") {
+          await this.sendStatusOtp(values.grievanceNo);
+          return buildResponse(body, action, {
+            code: "status_otp_sent",
+            name: "Kisan Help Center",
+            short_desc: "OTP sent to the mobile registered on this grievance. It is valid for 5 minutes.",
+          });
+        }
+        if (values.request_type !== "verify_status_otp") {
+          throw new KhcError("Invalid KHC status request_type.", "invalid_request");
+        }
+        result = await this.getStatus(values.grievanceNo, values.otp);
       }
       const fields = [
         "grievanceNo",
@@ -539,6 +781,7 @@ export class KhcService {
         "currentStatus",
         "currentLevel",
         "createdAt",
+        ...(action === "on_status" ? ["historyId", "escalationId", "address", "escalationHistory"] : []),
       ];
       return buildResponse(body, action, {
         code: action === "on_init" ? "grievance_created" : "grievance_status",
@@ -548,12 +791,15 @@ export class KhcService {
             ? "Grievance registered successfully."
             : "Grievance status retrieved.",
         list: fields
-          .filter((field) => typeof result[field] === "string")
-          .map((field) => ({
-            code: field,
-            name: field,
-            value: String(result[field]),
-          })),
+          .filter((field) => typeof result[field] === "string" || (action === "on_status" && result[field] != null))
+          .map((field) => {
+            const value = result[field];
+            return {
+              code: field,
+              name: field,
+              value: typeof value === "string" ? value : JSON.stringify(value),
+            };
+          }),
       });
     } catch (error: unknown) {
       const known = error instanceof KhcError;

@@ -28,6 +28,8 @@
 
 ## Installation
 
+Use **Node.js 26**, matching both Docker build and runtime stages.
+
 ```bash
 $ npm install
 ```
@@ -66,6 +68,19 @@ $ npm run test:cov
 | `ADVISORY_BACKEND` | `qdrant` | Advisory is served from Qdrant. Set `marqo` to fall back to the legacy Marqo path. |
 | `ADVISORY_QDRANT_COLLECTION_NAME` | `QDRANT_COLLECTION_NAME` | Collection holding advisory chunks (sandbox: `document-data`; production: the PROD collection). |
 | `ADVISORY_QDRANT_TOP_K` | `5` | Maximum advisory entries returned (best chunk per advisory entry). |
+| `ADVISORY_DEFAULT_SEASON` | _(empty)_ | Preferred season (for example `Rabi`), a soft ranking preference only: matching advisories rank first, others are still returned. When empty, the `season` search tag is used if sent; otherwise there is no season preference. |
+
+Optional request parameters go in `message.intent.item.tags`, in a tag group with code `search_params` (the query stays in `item.descriptor.name`):
+
+| Tag code | Effect |
+|---|---|
+| `crop` | Exact-match filter on the stored crop name (case and Hindi aliases are normalized, for example `wheat` or `गेहूं` becomes `Wheat`). |
+| `district` | Location filter. The source data has no location field yet, so the district query returns nothing and the crop-level results are used (`location-status: location_not_applied`). Both queries run in parallel on one embedding. |
+| `days_after_sowing` | Integer. Advisories whose `start_period`..`end_period` range contains it rank first (soft preference). |
+| `season` | Used as the preferred season only when `ADVISORY_DEFAULT_SEASON` is empty (soft preference). |
+| `top_k` | Maximum entries returned, 1 to 20. |
+
+The `search-context` tags in the reply add `location-status` (`not_requested`, `location_matched`, `location_not_applied`, `no_match`), `has-day-range` and `days-matched`.
 
 Uses the same `QDRANT_URL`, `QDRANT_API_KEY` and embedding setup (`HF_HOME`) as scheme search. The reply is `on_search` with `chunk-details` tags `title, crop, section, score, doc_id, chunk_id, source, text`; `text` ends with a `Source: <institute>, <creator>` line.
 
@@ -81,7 +96,8 @@ Icar provider service is reference app for adding contents related to vistaar ne
 
 The `khc-agri` provider supports new and existing farmers. Registration follows
 **send OTP -> verify OTP -> collect/confirm grievance details -> create grievance**.
-Status lookup asks only for the grievance number and does not require OTP.
+Status lookup uses a separate **grievance number -> send status OTP -> verify OTP
+and return status** flow. It never asks for a mobile number.
 
 Set these variables in the provider backend environment (not the browser):
 
@@ -93,6 +109,63 @@ KHC_API_KEY=<key supplied securely by KHC>
 The key is sent as `Authorization: ApiKey <key>`. Do not include the `ApiKey`
 prefix in `KHC_API_KEY`. The UAT host sends real SMS; production requires a
 separate base URL and key. No cookie copied from a browser is needed.
+
+### KHC master data cache
+
+The grievance-tree response supplies the KHC category/sub-category catalogue,
+including IDs and parent-child relationships. The chat LLM matches complaints
+semantically against those returned values; there is no complaint synonym table.
+The existing `suggested` field remains an optional lexical hint for API
+compatibility. Its absence does not mean the farmer must select from a menu.
+
+Reference lists (states, districts, sub-districts, villages, schemes, categories,
+sub-categories) are cached in Postgres. Lookups read the DB first and fall back to the
+KHC API when a list is missing, too old, or the DB is down; stale data is served if the API
+is also down. Two cron jobs keep it warm, each remembered in `khc_sync_job` so restarting
+the provider does not call KHC again:
+
+| Data | Cron (default) | Refreshed when older than | Trusted by lookups for |
+| --- | --- | --- | --- |
+| Schemes, categories, sub-categories | 1st of every month, 00:00 | 25 days | 35 days |
+| States, districts, sub-districts, villages | 1st of Jan/Apr/Jul/Oct, 00:30 | 85 days | 100 days |
+
+The location job runs 30 minutes after the other because they share one lock.
+
+Like the mandi cache, it needs no setup script: the `khc_*` tables are created at startup
+in the database the provider already uses (`IMD_DB_*`). Nothing to configure; override
+only if the cache should live elsewhere. Without DB settings everything still works
+through the API.
+
+```dotenv
+# KHC_DB_HOST= KHC_DB_PORT= KHC_DB_NAME= KHC_DB_USER= KHC_DB_PASSWORD= KHC_DB_SSL=   (default: IMD_DB_*)
+# KHC_MASTER_DB_ENABLED=false       # turn the cache off
+# KHC_MASTER_MAX_AGE_DAYS=35            # schemes/categories: how long reads trust a stored list
+# KHC_MASTER_LOCATION_MAX_AGE_DAYS=100  # places: same
+# KHC_SYNC_REFRESH_DAYS=25              # schemes/categories: the cron re-fetches lists older than this
+# KHC_SYNC_LOCATION_REFRESH_DAYS=85     # places: same (keep both below their cron gap)
+# KHC_SYNC_ENABLED=false            # turn the cron off
+# KHC_SYNC_ON_START=true            # at startup, run a job only if it has not finished in the last 25 days
+# KHC_SYNC_ON_START=force           # always run at startup (e.g. to load the remaining villages)
+# KHC_SYNC_GRIEVANCE_CRON="0 0 0 1 * *"   KHC_SYNC_LOCATION_CRON="0 30 0 1 */3 *"   # seconds first
+# KHC_VILLAGE_BATCH=10000           # sub-districts whose villages load per run (default loads all, ~7000 exist)
+```
+
+OTP limits (per mobile number, in memory per provider instance; override with env):
+a new OTP cannot be sent within 30 seconds of the last (`KHC_OTP_RESEND_SECONDS`), at most 3
+per hour (`KHC_OTP_MAX_SENDS_PER_HOUR`), and a wrong OTP gets 5 tries before a new OTP is
+needed (`KHC_OTP_MAX_ATTEMPTS`). Blocked requests return the `rate_limited` result with a
+plain message the bot repeats to the farmer.
+
+Two extra `/mobility/init` request types use the cache:
+
+| `request_type` | Inputs | Result tag |
+| --- | --- | --- |
+| `find_location` | `name`; optional `state_name`/`state_id`, `district_name`/`district_id` | `khc_location`: matches with state, district, block and village ids; `needs` says what to ask next when nothing matched |
+| `grievance_tree` | `state_name` or `state_id`; optional `scheme_name` | `khc_grievance_tree`: the state's schemes, or the named scheme's categories with sub-categories |
+
+Villages not reached by the cron are cached the first time someone asks for them. To
+run the DB tests: `KHC_TEST_DB_HOST=... KHC_TEST_DB_NAME=... KHC_TEST_DB_USER=...
+KHC_TEST_DB_PASSWORD=... npx jest src/services/khc`.
 
 Beckn requests use `provider.id = khc-agri`, item `khc-grievance`, and flat
 `message.order.fulfillments[0].customer.person.tags`:
@@ -141,10 +214,54 @@ confirmed grievance fields. Per the KHC guide, resending the same reference retu
 the existing grievance instead of creating another. After a timeout or malformed
 creation response, do not blindly submit a new reference; verify with KHC first.
 
-Status is sent upstream as
-`GET /v1/state/grievances/status?grievanceNo=<encoded number>`, not as a header.
-Successful results include the grievance number, status, current level and date
-when provided. A missing grievance is an explicit `not_found` result.
+Status follows the KHC **28 October 2026 Grievance Status with OTP** guide.
+Both steps use Beckn `/status`, provider `khc-agri`, item `khc-grievance`, with
+inputs in customer person tags:
+
+| `request_type` | Required tags | Upstream call | Result code |
+| --- | --- | --- | --- |
+| `get_status_otp` | `grievanceNo` | `POST /v1/state/grievances/check-status?grievanceNo=<encoded number>` (no body) | `status_otp_sent` |
+| `verify_status_otp` | `grievanceNo`, `otp` (six-digit string) | `POST /v1/state/grievances/verify-otp` with JSON `{ "grievanceNo": "...", "otp": "..." }` | `grievance_status` |
+
+These paths are relative to the existing `KHC_BASE_URL`, which already includes
+the API prefix; do not add another `/api`. Both calls use ApiKey authorization.
+The send response has `status` and `message`, without `data`. Only verification
+returns grievance details. The old direct GET status endpoint is no longer used.
+
+Both status operations validate `grievanceNo` before calling KHC: two ASCII letters,
+a nonempty numeric middle section and a positive digit-only sequence separated by
+slashes, for example `BR/240926/1` or `JK/2310261/1`, with at most 100 characters
+after trimming. The prefix is
+uppercased and leading zeros are preserved, including in the resend-limit key.
+Zero-only sequences, malformed values and non-string tags return `invalid_request`
+without sending SMS. The OAN agent converts regional digits before forwarding.
+Only the structure is checked locally, not the middle section's length, calendar
+validity or grievance existence. `grievanceNo` is assigned by the KHC creation API
+and passed through unchanged, not calculated from the state/date by this provider.
+The caller's separate `externalReferenceNo` must not be used as the status ID.
+OTP verification continues to require exactly six digits.
+
+KHC sends the OTP to the mobile registered on the grievance and enforces its
+five-minute lifetime, single use and invalidation on resend. No registration
+session/token is created or reused for status. Incorrect OTPs can be corrected
+until expiry; expired or used OTPs require another send. Do not automatically retry
+either POST. The existing send-limit settings also apply per grievance number
+(separate from registration's per-mobile limits); registration's five-attempt
+verification limit does not apply to status.
+
+Verified results preserve grievance/external reference numbers, status, current
+level, date, internal history/escalation IDs and JSON-encoded `address` and
+`escalationHistory` tags, including officer comments and nullable nested fields.
+Missing optional fields are omitted. OTPs and request fulfillments are never echoed.
+A missing grievance returns `not_found`, no registered mobile returns `invalid_mobile`,
+and wrong/expired/used OTPs return `invalid_otp`. Authentication failures return
+`configuration_error`; SMS/transport failures return `upstream_error`.
+For HTTP 400, the documented `grievanceNo is required` and `otp is required`
+messages produce field-specific explanations. An unidentified verification
+validation error is not labeled an incorrect ID or OTP. Unknown upstream messages
+are not echoed, so diagnostics cannot leak secrets. HTTP 404 asks the farmer to
+recheck the grievance ID in the registered-mobile SMS; HTTP 401 OTP errors retain
+the documented "invalid or expired" ambiguity instead of guessing the cause.
 
 Run focused tests:
 
@@ -189,8 +306,12 @@ file permissions, and never commit key files. The provider unwraps `encrypted_ke
 with RSA-OAEP/SHA-256, then decrypts `encrypted_data` with AES-256-GCM and verifies
 `auth_tag` before parsing the returned array. Unsupported encryption, malformed
 payloads, missing/wrong keys and authentication failures return an error catalog;
-they do not return a success-shaped empty result. Audits retain encrypted response
-envelopes rather than decrypted farmer records.
+they do not return a success-shaped empty result.
+
+AgriStack Category A/B/C calls no longer write API audit details to PostgreSQL.
+The provider no longer creates or inserts into `agristack_api_audit`, and
+`AGRISTACK_AUDIT_TABLE` is no longer used. Existing audit tables and records are
+left untouched. Application logging and the chat API's Redis caching are unchanged.
 
 Run focused tests:
 `npm test -- --runInBand --runTestsByPath src/services/agristack/agristack.service.spec.ts`.

@@ -17,6 +17,9 @@ const POINT = {
     institute: 'ICAR–DKMA',
     creator: 'jak',
     type: 'advisory',
+    season: 'Rabi',
+    start_period: '105',
+    end_period: '120',
   },
 };
 
@@ -72,8 +75,47 @@ describe('QdrantClientService.queryAdvisoryPoints', () => {
         crop: 'Sorghum',
         institute: 'ICAR–DKMA',
         creator: 'jak',
+        season: 'Rabi',
+        start_period: 105,
+        end_period: 120,
+        // This point has no location fields (indexed before location existed): it applies everywhere.
+        location_national: true,
+        location_state_codes: [],
+        location_statewide_codes: [],
+        location_district_codes: [],
+        location_state_names: [],
+        location_district_names: [],
       },
     ]);
+  });
+
+  it('reads the location fields docs-pipeline stores', async () => {
+    mockedPost.mockResolvedValue({
+      status: 200,
+      data: {
+        result: {
+          points: [
+            {
+              score: 0.5,
+              payload: {
+                ...POINT.payload,
+                location_national: false,
+                location_state_codes: [9],
+                location_statewide_codes: [],
+                location_district_codes: [118, 123],
+                location_state_names: ['Uttar Pradesh'],
+                location_district_names: ['Agra', 'Azamgarh'],
+              },
+            },
+          ],
+        },
+      },
+    } as any);
+    const [hit] = await service.queryAdvisoryPoints([0.1]);
+    expect(hit.location_national).toBe(false);
+    expect(hit.location_state_codes).toEqual([9]);
+    expect(hit.location_district_codes).toEqual([118, 123]);
+    expect(hit.location_district_names).toEqual(['Agra', 'Azamgarh']);
   });
 
   it('falls back to name_en for PDF chunks and leaves pop_id/institute empty', async () => {
@@ -90,6 +132,34 @@ describe('QdrantClientService.queryAdvisoryPoints', () => {
     expect(hit.pop_id).toBeUndefined();
     expect(hit.institute).toBe('');
     expect(hit.creator).toBe('');
+    expect(hit.season).toBe('');
+    expect(hit.start_period).toBeNull();
+    expect(hit.end_period).toBeNull();
+  });
+
+  it('adds the crop as an exact-match filter when given', async () => {
+    await service.queryAdvisoryPoints([0.1], { crop: 'Wheat' });
+    const body = (mockedPost.mock.calls[0] as any[])[1];
+    expect(body.filter.must).toEqual([
+      { key: 'type', match: { value: 'advisory' } },
+      { key: 'crop', match: { value: 'Wheat' } },
+    ]);
+  });
+
+  it('never filters on season, days after sowing or the farmer place', async () => {
+    await service.queryAdvisoryPoints([0.1], { crop: 'Wheat' });
+    const keys = (mockedPost.mock.calls[0] as any[])[1].filter.must.map((c: any) => c.key);
+    expect(keys).toEqual(['type', 'crop']);
+  });
+
+  it('reads negative and non-numeric day ranges safely', async () => {
+    mockedPost.mockResolvedValue({
+      status: 200,
+      data: { result: { points: [{ score: 0.5, payload: { text: 't', start_period: '-30', end_period: 'abc' } }] } },
+    } as any);
+    const [hit] = await service.queryAdvisoryPoints([0.1]);
+    expect(hit.start_period).toBe(-30);
+    expect(hit.end_period).toBeNull();
   });
 
   it('throws when Qdrant is not configured', async () => {

@@ -2,6 +2,11 @@ import { Injectable } from "@nestjs/common";
 import axios from "axios";
 import * as crypto from "crypto";
 import { LoggerService, appLogger } from '../logger/logger.service';
+import {
+  classifyRequestError,
+  ExternalApiOutcome,
+  trackExternalApiCall,
+} from "../../telemetry";
 
 const GCM_AUTH_TAG_LENGTH = 16;
 const AES_256_KEY_LENGTH = 32;
@@ -102,6 +107,44 @@ function decryptGrievanceResponse(encryptedBase64: string): any {
   }
 }
 
+const GRIEVANCE_TELEMETRY_NAMES: Record<string, string> = {
+  "/GrievanceAadhaarToken": "pmkisan_grievance_aadhaar_token",
+  "/GrievanceStatusCheck": "pmkisan_grievance_status",
+  "/LodgeGrievance": "pmkisan_grievance_lodge",
+};
+
+function isFalseFlag(value: any): boolean {
+  return value === false || String(value ?? "").toLowerCase() === "false";
+}
+
+/**
+ * Classify a grievance API result: "False" in any of the API's (misspelt)
+ * status fields, or a missing Aadhaar token, means PM-Kisan refused the request.
+ */
+function getGrievanceOutcome(
+  endpoint: string,
+  result: any,
+): { outcome: ExternalApiOutcome; message?: string } {
+  if (!result || typeof result !== "object") {
+    return { outcome: "rejected", message: typeof result === "string" ? result : undefined };
+  }
+
+  const message = result.Message ?? result.message ?? result.Remark;
+  const refused =
+    isFalseFlag(result.status) ||
+    isFalseFlag(result.Status) ||
+    isFalseFlag(result.Responce) ||
+    isFalseFlag(result.Rsponce);
+  const missingToken =
+    endpoint === "/GrievanceAadhaarToken" &&
+    !(result.AadhaarToken ?? result.aadhaarToken ?? result.AadharToken ?? result.aadharToken);
+
+  if (refused || missingToken) {
+    return { outcome: "rejected", message: message ?? (missingToken ? "Aadhaar token not received" : undefined) };
+  }
+  return { outcome: "success", message };
+}
+
 @Injectable()
 export class PmkisanGrievanceService {
   constructor(private readonly logger: LoggerService) {}
@@ -137,6 +180,46 @@ export class PmkisanGrievanceService {
     payload: any,
     logPrefix: string,
   ): Promise<any> {
+    const url = `${baseUrl}${endpoint}`;
+    const startedAt = Date.now();
+    const track = (
+      outcome: ExternalApiOutcome,
+      statusCode: number | null,
+      errorType?: string,
+      upstreamMessage?: string,
+    ) =>
+      trackExternalApiCall({
+        apiService: GRIEVANCE_TELEMETRY_NAMES[endpoint] ?? `pmkisan_grievance${endpoint}`,
+        url,
+        startedAt,
+        outcome,
+        statusCode,
+        errorType,
+        upstreamMessage,
+        identifierType: payload?.Type,
+      });
+
+    try {
+      const { httpStatus, result } = await this.requestEncryptedEndpoint(
+        url,
+        payload,
+        logPrefix,
+      );
+      const { outcome, message } = getGrievanceOutcome(endpoint, result);
+      track(outcome, httpStatus, undefined, message);
+      return result;
+    } catch (error) {
+      const { statusCode, errorType } = classifyRequestError(error);
+      track("error", statusCode, errorType, error?.message);
+      throw error;
+    }
+  }
+
+  private async requestEncryptedEndpoint(
+    url: string,
+    payload: any,
+    logPrefix: string,
+  ): Promise<{ httpStatus: number; result: any }> {
     this.logger.log("=".repeat(60));
     this.logger.log(`[PMKISAN GRIEVANCE] ${logPrefix} JSON being encrypted:`);
     this.logger.log(JSON.stringify(payload, null, 2));
@@ -149,7 +232,6 @@ export class PmkisanGrievanceService {
     this.logger.log(JSON.stringify(requestBody, null, 2));
     this.logger.log("=".repeat(60));
 
-    const url = `${baseUrl}${endpoint}`;
     const response = await axios.request({
       method: "post",
       maxBodyLength: Infinity,
@@ -157,7 +239,9 @@ export class PmkisanGrievanceService {
       headers: { "Content-Type": "application/json" },
       data: requestBody,
       timeout: 15000,
+      skipTelemetry: true,
     });
+    const httpStatus = response.status;
 
     const rawApiResponse = response.data;
     this.logger.log(`[PMKISAN GRIEVANCE] ${logPrefix} Raw API response:`);
@@ -168,12 +252,12 @@ export class PmkisanGrievanceService {
       rawApiResponse?.d?.output ?? rawApiResponse?.output ?? rawApiResponse;
 
     if (typeof outputField !== "string" || outputField.length === 0) {
-      return rawApiResponse;
+      return { httpStatus, result: rawApiResponse };
     }
 
     const looksEncrypted = /^[A-Za-z0-9+/]+=*$/.test(outputField.trim());
     if (!looksEncrypted) {
-      return { status: "False", Message: outputField };
+      return { httpStatus, result: { status: "False", Message: outputField } };
     }
 
     this.logger.log(`[PMKISAN GRIEVANCE] ${logPrefix} Encrypted output from API:`);
@@ -185,7 +269,7 @@ export class PmkisanGrievanceService {
     this.logger.log(JSON.stringify(decryptedOutput, null, 2));
     this.logger.log("=".repeat(60));
 
-    return decryptedOutput;
+    return { httpStatus, result: decryptedOutput };
   }
 
   async searchGrievanceStatus(body: any): Promise<any> {
