@@ -12,6 +12,7 @@ const HIT: AdvisoryHit = {
   crop: 'Sorghum',
   institute: 'ICAR–DKMA',
   creator: 'jak',
+  origin: 'webhook',
   season: 'Rabi',
   start_period: 105,
   end_period: 120,
@@ -49,7 +50,7 @@ describe('buildAdvisoryOnSearch', () => {
     const tags = tagMap(item);
     expect(Object.keys(tags).sort()).toEqual(
       [
-        'chunk_id', 'crop', 'doc_id', 'score', 'section', 'source', 'text', 'title',
+        'chunk_id', 'crop', 'doc_id', 'origin', 'score', 'section', 'source', 'text', 'title',
         'location-match', 'location-national', 'location-states', 'location-districts',
       ].sort(),
     );
@@ -58,6 +59,7 @@ describe('buildAdvisoryOnSearch', () => {
     expect(tags.section).toBe('full');
     expect(tags.score).toBe('0.8321');
     expect(tags.doc_id).toBe('row-1');
+    expect(tags.origin).toBe('webhook');
     expect(tags.chunk_id).toBe('chunk-1');
     expect(tags.source).toBe('ICAR–DKMA, jak');
   });

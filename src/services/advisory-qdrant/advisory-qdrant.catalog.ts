@@ -84,6 +84,7 @@ export function buildAdvisoryOnSearch(options: BuildAdvisoryCatalogOptions) {
             tag('doc_id', 'Document ID', hit.doc_id),
             tag('chunk_id', 'Chunk ID', hit.chunk_id),
             tag('source', 'Source', source),
+            tag('origin', 'Origin', hit.origin),
             tag('text', 'Text', text),
             tag('location-match', 'Location Match', hit.location_match ?? 'not_requested'),
             tag('location-national', 'Applies Everywhere', String(isNational(hit))),

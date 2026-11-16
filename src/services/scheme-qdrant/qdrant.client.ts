@@ -217,6 +217,7 @@ export class QdrantClientService {
       crop: String(payload.crop ?? ''),
       institute: String(payload.institute ?? ''),
       creator: String(payload.creator ?? ''),
+      origin: String(payload.source ?? ''),
       season: String(payload.season ?? ''),
       start_period: this.periodFrom(payload.start_period),
       end_period: this.periodFrom(payload.end_period),
