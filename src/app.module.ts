@@ -45,6 +45,8 @@ import { AgristackService } from "./services/agristack/agristack.service";
 import { KhcService } from "./services/khc/khc.service";
 import { KhcMasterService } from "./services/khc/khc-master.service";
 import { KhcMasterSyncService } from "./services/khc/khc-master-sync.service";
+import { FfsService } from "./services/ffs/ffs.service";
+import { FfsSessionStore } from "./services/ffs/ffs-session.store";
 
 @Module({
   imports: [
@@ -102,6 +104,8 @@ import { KhcMasterSyncService } from "./services/khc/khc-master-sync.service";
     KhcMasterService,
     KhcService,
     KhcMasterSyncService,
+    FfsService,
+    FfsSessionStore,
   ],
 })
 export class AppModule {}

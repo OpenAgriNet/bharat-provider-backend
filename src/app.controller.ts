@@ -27,6 +27,7 @@ import { SchemeQdrantService } from "./services/scheme-qdrant/scheme-qdrant.serv
 import { AdvisoryQdrantService } from "./services/advisory-qdrant/advisory-qdrant.service";
 import { AgristackService } from "./services/agristack/agristack.service";
 import { KhcService } from "./services/khc/khc.service";
+import { FfsService } from "./services/ffs/ffs.service";
 import { LoggerService } from './services/logger/logger.service';
 
 @Controller("")
@@ -43,7 +44,8 @@ export class AppController {
     private readonly advisoryQdrantService: AdvisoryQdrantService,
     private readonly agristackService: AgristackService,
     private readonly logger: LoggerService,
-    private readonly khcService: KhcService) { }
+    private readonly khcService: KhcService,
+    private readonly ffsService: FfsService) { }
 
   @Get()
   getHello(): string {
@@ -273,6 +275,9 @@ export class AppController {
     switch (providerId) {
       case "khc-agri":
         return this.khcService.handle(body, "on_init");
+
+      case "ffs-agri":
+        return this.ffsService.handle(body);
 
       case "pmkisan-greviance":
         this.logger.log("INSIDE PMKISAN GRIEVANCE INIT...");

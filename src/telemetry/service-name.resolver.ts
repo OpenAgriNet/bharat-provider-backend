@@ -64,6 +64,7 @@ const ROUTE_TO_SERVICE: Record<string, string> = {
   'kcc-agri': 'kcc',
   'agristack-agri': 'agristack',
   'khc-agri': 'khc',
+  'ffs-agri': 'ffs',
 };
 
 const ROUTE_NAME_BY_SERVICE: Record<string, string> = {
@@ -82,6 +83,7 @@ const ROUTE_NAME_BY_SERVICE: Record<string, string> = {
   kcc: 'kcc-agri',
   agristack: 'agristack-agri',
   khc: 'khc-agri',
+  ffs: 'ffs-agri',
   'grievance-agri': 'grievance-agri',
   'pmkisan-greviance': 'pmkisan-greviance',
   'pmkisan-installment-status': 'pmkisan-installment-status',
@@ -285,6 +287,8 @@ function resolveMobilityRoute(body: BecknBody): string {
       return 'agristack-agri';
     case providerId === 'khc-agri':
       return 'khc-agri';
+    case providerId === 'ffs-agri':
+      return 'ffs-agri';
     default:
       return 'unknown';
   }
